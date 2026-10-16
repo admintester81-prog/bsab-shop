@@ -27,7 +27,7 @@ export default function CustomerBottomNav() {
     return (
         <nav
             aria-label="Mobile navigation"
-            className="fixed right-0 bottom-0 left-0 z-30 flex items-center justify-around border-t border-[#dce8de] bg-[#fbfaf6] px-2 py-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom,0px))] lg:hidden"
+            className="fixed right-0 bottom-0 left-0 z-30 flex items-center justify-around border-t border-[#dce8de] bg-[#fbfaf6] px-2 py-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom,0px))] md:hidden"
         >
             {items.map(({ label, href, icon: Icon }) => {
                 const active = isActive(href);

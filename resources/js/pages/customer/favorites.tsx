@@ -1,7 +1,10 @@
 import { PortalLayout } from '@/components/portal-layout';
+import ProductCard from '@/components/ProductCard';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { ArrowLeft, Heart, ShoppingCart, X } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
+
+import '../../../css/design.css';
 
 type Product = {
     id: number;
@@ -9,26 +12,15 @@ type Product = {
     base_price: string;
     sale_price?: string;
     stock_quantity: number;
-    status: string;
-    is_approved: boolean;
-    category?: { name: string; slug: string };
+    available_stock: number;
+    is_out_of_stock: boolean;
+    average_rating: number;
+    review_count: number;
+    selling_unit?: string | null;
+    category?: { name: string; slug: string } | null;
     shop?: { name: string };
     images?: { path: string }[];
 };
-
-// Distinct muted colours for initials placeholders
-const PLACEHOLDER_COLORS = ['#3d5a7a', '#5c3b2e', '#2e5c3b', '#5c3b5a', '#3b4e5c', '#7a5c2e', '#4b3d7a', '#5c4b2e'];
-function getPlaceholderColor(id: number) {
-    return PLACEHOLDER_COLORS[id % PLACEHOLDER_COLORS.length];
-}
-function getInitials(name: string) {
-    const words = name.trim().split(/\s+/);
-    if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-    return (words[0][0] + words[1][0]).toUpperCase();
-}
-function formatPrice(price: number | string) {
-    return '₱' + Number(price).toLocaleString('en-PH', { maximumFractionDigits: 0 });
-}
 
 type Toast = { id: number; message: string; undoFn?: () => void };
 let _toastId = 0;
@@ -143,93 +135,20 @@ export default function CustomerFavorites({ products = [] }: { products?: Produc
                 {favorites.length > 0 ? (
                     <div className="grid grid-cols-2 gap-5.5 sm:grid-cols-3 lg:grid-cols-4">
                         {favorites.map((product) => {
-                            const rawImage = product.images?.[0]?.path;
-                            const imgSrc = rawImage
-                                ? rawImage.startsWith('http') || rawImage.startsWith('/')
-                                    ? rawImage
-                                    : `/storage/${rawImage}`
-                                : null;
-
-                            const basePrice = Number(product.base_price);
-                            const salePrice = product.sale_price ? Number(product.sale_price) : null;
-                            const hasSale = salePrice !== null && salePrice < basePrice;
-                            const displayPrice = hasSale ? salePrice! : basePrice;
-                            const discountPct = hasSale ? Math.round((1 - salePrice! / basePrice) * 100) : 0;
-
                             const isFading = removing.has(product.id);
                             return (
-                                <article
+                                <ProductCard
                                     key={product.id}
-                                    onClick={() => router.visit(route('products.show', product.id))}
-                                    onKeyDown={(event) => {
-                                        if (event.key === 'Enter' || event.key === ' ') {
-                                            event.preventDefault();
-                                            router.visit(route('products.show', product.id));
-                                        }
-                                    }}
-                                    role="link"
-                                    tabIndex={0}
-                                    className="flex flex-col overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgba(22,59,36,0.08)]"
-                                    style={{
-                                        opacity: isFading ? 0 : 1,
-                                        transform: isFading ? 'scale(0.95)' : 'scale(1)',
-                                        transition: 'opacity 200ms ease, transform 200ms ease',
-                                    }}
-                                >
-                                    {/* Image / placeholder */}
-                                    <div className="relative aspect-4/3 w-full overflow-hidden">
-                                        {imgSrc ? (
-                                            <img
-                                                src={imgSrc}
-                                                alt={product.name}
-                                                className="h-full w-full object-cover"
-                                                onError={(e) => {
-                                                    (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                                }}
-                                            />
-                                        ) : (
-                                            <div
-                                                className="flex h-full w-full items-center justify-center"
-                                                style={{ backgroundColor: getPlaceholderColor(product.id) }}
-                                            >
-                                                <span className="text-2xl font-bold tracking-wider text-white/80">{getInitials(product.name)}</span>
-                                            </div>
-                                        )}
-                                        {/* Heart / remove button */}
-                                        <button
-                                            onClick={(event) => {
-                                                event.stopPropagation();
-                                                removeFavorite(product.id);
-                                            }}
-                                            className="absolute top-2.5 right-2.5 flex h-9 w-9 items-center justify-center rounded-full bg-transparent text-[#2c9350] transition-transform hover:scale-110"
-                                            aria-label={`Remove ${product.name} from favorites`}
-                                        >
-                                            <Heart size={16} fill="currentColor" />
-                                        </button>
-                                    </div>
-
-                                    {/* Card body */}
-                                    <div className="flex flex-1 flex-col p-4">
-                                        <span className="text-[11px] font-bold tracking-wide text-[#2c9350] uppercase">
-                                            {product.category?.name ?? 'Marketplace'}
-                                        </span>
-                                        <h2 className="mt-1 line-clamp-2 text-sm leading-snug font-bold text-[#163b24]">{product.name}</h2>
-                                        <p className="mt-0.5 truncate text-xs text-[#8a9490]">Sold by {product.shop?.name ?? 'BSABShop Seller'}</p>
-
-                                        {/* Price */}
-                                        <div className="mt-3 flex flex-wrap items-baseline gap-1.5">
-                                            <span className="text-lg font-extrabold text-[#163b24]">{formatPrice(displayPrice)}</span>
-                                            {hasSale && (
-                                                <>
-                                                    <span className="text-xs text-[#9ca3af] line-through">{formatPrice(basePrice)}</span>
-                                                    <span className="rounded-full bg-[#dcfce7] px-1.5 py-0.5 text-[10px] font-bold text-[#2c9350]">
-                                                        -{discountPct}%
-                                                    </span>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                </article>
+                                    product={product}
+                                    liked={favoriteIds.includes(product.id)}
+                                    onToggleFavorite={() => removeFavorite(product.id)}
+                                    onOpenProduct={() => router.visit(route('products.show', product.id))}
+                                    style={
+                                        isFading
+                                            ? { opacity: 0, transform: 'scale(0.95)', transition: 'opacity 200ms ease, transform 200ms ease' }
+                                            : undefined
+                                    }
+                                />
                             );
                         })}
                     </div>

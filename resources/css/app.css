@@ -398,6 +398,12 @@ html:has(.marketplace-page)::-webkit-scrollbar {
     }
 }
 
+@media (max-width: 1023px) {
+    .marketplace-page nav[aria-label='Product categories'] {
+        border: none;
+    }
+}
+
 @layer components {
     .auth-content input:not([type='checkbox']) {
         height: auto;

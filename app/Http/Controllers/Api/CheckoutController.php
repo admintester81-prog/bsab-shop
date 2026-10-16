@@ -38,7 +38,7 @@ class CheckoutController extends Controller
             'shipping_address.full_name' => 'required|string|max:255',
             'shipping_address.phone' => 'required|string|max:50',
             'shipping_address.line1' => 'required|string|max:255',
-            'shipping_address.barangay' => 'required|string|max:150',
+            'shipping_address.barangay' => 'nullable|string|max:150',
             'shipping_address.house_number' => 'nullable|string|max:255',
             'shipping_address.delivery_instructions' => 'nullable|string|max:1000',
             'shipping_address.city' => 'required|string|max:255',
@@ -74,24 +74,31 @@ class CheckoutController extends Controller
                 'Checkout is currently available only in Hinoba-an, Negros Occidental.'
             );
 
-            $zone = DeliveryZone::query()
-                ->active()
-                ->whereRaw('LOWER(barangay) = ?', [mb_strtolower(trim($address['barangay']))])
-                ->first();
-            abort_unless(
-                $zone,
-                422,
-                DeliveryZone::active()->exists()
-                    ? 'This barangay does not match an active delivery zone. Please contact support.'
-                    : 'Checkout is unavailable until an active delivery zone and delivery fee are configured.'
-            );
-
             $deliveryOptions = SiteSetting::homeSettings()['shipping_options'];
             abort_unless(
                 (bool) ($deliveryOptions[$validated['delivery_option']] ?? false),
                 422,
                 'This delivery option is currently unavailable.'
             );
+
+            $zone = filled($address['barangay'] ?? null)
+                ? DeliveryZone::query()
+                    ->active()
+                    ->whereRaw('LOWER(barangay) = ?', [mb_strtolower(trim($address['barangay']))])
+                    ->first()
+                : null;
+            if ($validated['delivery_option'] !== 'pickup') {
+                if (! $zone) {
+                    $hasActiveZones = DeliveryZone::active()->exists();
+                    $message = ! $hasActiveZones
+                        ? 'Checkout is unavailable until an active delivery zone and delivery fee are configured.'
+                        : (filled($address['barangay'] ?? null)
+                            ? 'This barangay does not match an active delivery zone. Please contact support.'
+                            : 'Select a valid barangay delivery zone for delivery, or choose pickup.');
+
+                    abort(422, $message);
+                }
+            }
 
             if ($validated['payment_method'] === 'gcash') {
                 $shopIds = $checkoutItems->pluck('product.shop_id')->filter()->unique()->values();
@@ -111,7 +118,7 @@ class CheckoutController extends Controller
             $voucher = $cart->voucher ? Voucher::query()->lockForUpdate()->findOrFail($cart->voucher_id) : null;
             $voucherQuote = $voucher ? $vouchers->quote($voucher, $request->user(), $checkoutItems) : null;
             $discount = $voucherQuote['discount'] ?? 0;
-            $freeByThreshold = $zone->is_free_delivery
+            $freeByThreshold = $zone && $zone->is_free_delivery
                 && ($zone->free_delivery_minimum === null || $subtotal >= (float) $zone->free_delivery_minimum);
             $shippingFee = $validated['delivery_option'] === 'pickup' || $freeByThreshold
                 ? 0
@@ -120,9 +127,11 @@ class CheckoutController extends Controller
                 $shippingFee = 0;
             }
             $total = max(0, $subtotal + $shippingFee - $discount);
-            $address['delivery_zone_id'] = $zone->id;
-            $address['delivery_zone_name'] = $zone->name;
-            $address['delivery_estimate'] = $zone->estimated_delivery_text;
+            if ($zone) {
+                $address['delivery_zone_id'] = $zone->id;
+                $address['delivery_zone_name'] = $zone->name;
+                $address['delivery_estimate'] = $zone->estimated_delivery_text;
+            }
             $address['delivery_option'] = $validated['delivery_option'];
 
             $order = Order::create([

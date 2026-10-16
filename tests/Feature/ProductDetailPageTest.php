@@ -54,6 +54,26 @@ class ProductDetailPageTest extends TestCase
                 ->has('availableVouchers', 0));
     }
 
+    public function test_marketplace_lists_only_published_products_approved_by_an_admin(): void
+    {
+        $approvedProduct = $this->makeProduct();
+        $unapprovedProduct = $approvedProduct->replicate();
+        $unapprovedProduct->slug = 'unapproved-detail-page-product';
+        $unapprovedProduct->sku = 'DETAIL-PAGE-UNAPPROVED';
+        $unapprovedProduct->status = 'pending';
+        $unapprovedProduct->is_approved = false;
+        $unapprovedProduct->save();
+
+        $this->get(route('marketplace'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('products', fn ($products) => $products->pluck('id')->all() === [$approvedProduct->id])
+                ->where('categories.0.products_count', 1));
+
+        $this->get(route('products.show', $unapprovedProduct))
+            ->assertNotFound();
+    }
+
     private function makeProduct(): Product
     {
         $seller = User::factory()->create();

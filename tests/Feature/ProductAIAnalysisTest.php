@@ -24,63 +24,64 @@ class ProductAIAnalysisTest extends TestCase
             'slug' => 'shoes-'.uniqid(),
             'image' => null,
         ]);
-        config(['services.gemini.api_key' => 'test-gemini-key']);
+            config(['services.ollama.base_url' => 'http://127.0.0.1:11434']);
+            config(['services.ollama.vision_model' => 'qwen2.5vl:3b']);
 
-        Http::fake([
-            'generativelanguage.googleapis.com/*' => Http::response([
-                'candidates' => [[
-                    'content' => [
-                        'parts' => [[
-                            'text' => json_encode([
-                                'name' => 'Trail Runner',
-                                'category' => 'Shoes',
-                                'brand' => 'Northline',
-                                'colors' => ['Black'],
-                                'options' => [['name' => 'Size', 'values' => ['8', '9']]],
-                            ]),
-                        ]],
+            Http::fake([
+                'http://127.0.0.1:11434/api/chat' => Http::response([
+                    'message' => [
+                        'content' => json_encode([
+                            'name' => 'Trail Runner',
+                            'category' => 'Shoes',
+                            'brand' => 'Northline',
+                            'colors' => ['Black'],
+                            'options' => [['name' => 'Size', 'values' => ['8', '9']]],
+                        ]),
                     ],
-                ]],
-            ]),
-        ]);
+                ]),
+            ]);
 
-        $response = $this->actingAs($user, 'web')->post('/seller/products/ai-analyze', [
-            'image' => $this->productImage(),
-        ]);
+            $response = $this->actingAs($user, 'web')->post('/seller/products/ai-analyze', [
+                'image' => $this->productImage(),
+            ]);
 
-        $response->assertOk()
-            ->assertJsonPath('success', true)
-            ->assertJsonPath('data.name', 'Trail Runner')
-            ->assertJsonPath('data.brand', 'Northline')
-            ->assertJsonPath('data.category_id', $category->id)
-            ->assertJsonPath('data.options.0.name', 'Size')
-            ->assertJsonPath('data.options.0.values.1', '9');
+            $response->assertOk()
+                ->assertJsonPath('success', true)
+                ->assertJsonPath('data.name', 'Trail Runner')
+                ->assertJsonPath('data.brand', 'Northline')
+                ->assertJsonPath('data.category_id', $category->id)
+                ->assertJsonPath('data.options.0.name', 'Size')
+                ->assertJsonPath('data.options.0.values.1', '9');
 
-        Http::assertSent(fn ($request) => str_contains($request->url(), 'gemini-2.5-flash:generateContent')
-            && $request->hasHeader('x-goog-api-key', 'test-gemini-key'));
-    }
+            Http::assertSent(fn ($request) => str_contains($request->url(), 'http://127.0.0.1:11434/api/chat')
+                && isset($request['model'])
+                && $request['model'] === 'qwen2.5vl:3b'
+                && $request['options']['num_ctx'] === 2048
+                && $request['options']['num_predict'] === 512);
+        }
 
-    public function test_gemini_permission_errors_return_actionable_guidance(): void
-    {
-        Role::findOrCreate('seller');
-        $user = User::factory()->create();
-        $user->assignRole('seller');
-        config(['services.gemini.api_key' => 'test-gemini-key']);
+        public function test_ollama_permission_errors_return_actionable_guidance(): void
+        {
+            Role::findOrCreate('seller');
+            $user = User::factory()->create();
+            $user->assignRole('seller');
+            config(['services.ollama.base_url' => 'http://127.0.0.1:11434']);
+            config(['services.ollama.vision_model' => 'qwen2.5vl:3b']);
 
-        Http::fake([
-            'generativelanguage.googleapis.com/*' => Http::response([
-                'error' => ['message' => 'This API key does not have permission to use this API.'],
-            ], 403),
-        ]);
+            Http::fake([
+                'http://127.0.0.1:11434/api/chat' => Http::response([
+                    'error' => 'model not found',
+                ], 404),
+            ]);
 
-        $response = $this->actingAs($user, 'web')->post('/seller/products/ai-analyze', [
-            'image' => $this->productImage(),
-        ]);
+            $response = $this->actingAs($user, 'web')->post('/seller/products/ai-analyze', [
+                'image' => $this->productImage(),
+            ]);
 
-        $response->assertUnprocessable()
-            ->assertJsonPath('success', false)
-            ->assertJsonPath('message', 'Gemini access is forbidden. Check that the API key is valid, the Generative Language API is enabled for its Google project, and the key allows Gemini requests.');
-    }
+            $response->assertUnprocessable()
+                ->assertJsonPath('success', false)
+                ->assertJsonPath('message', 'Ollama could not find the configured vision model. Pull the model locally or update OLLAMA_VISION_MODEL.');
+        }
 
     private function productImage(): UploadedFile
     {

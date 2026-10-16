@@ -9,9 +9,19 @@ use Monolog\LogRecord;
 
 class AddRequestContextToLog
 {
-    public function __invoke(Logger $logger): void
+    public function __invoke(object $logger): void
     {
-        $logger->pushProcessor(function (LogRecord $record): LogRecord {
+        $configuredLogger = $logger;
+
+        if ($logger instanceof \Illuminate\Log\Logger && method_exists($logger, 'getLogger')) {
+            $configuredLogger = $logger->getLogger();
+        }
+
+        if (! $configuredLogger instanceof Logger) {
+            return;
+        }
+
+        $configuredLogger->pushProcessor(function (LogRecord $record): LogRecord {
             if (! app()->bound('request')) {
                 return $record;
             }

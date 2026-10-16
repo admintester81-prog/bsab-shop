@@ -17,7 +17,9 @@ class ProductAIController extends Controller
     public function analyze(Request $request): JsonResponse
     {
         $request->validate([
-            'image' => ['required', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'image' => ['sometimes', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'images' => ['sometimes', 'array'],
+            'images.*' => ['required', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
 
         if (! $request->user()?->hasRole('seller')) {
@@ -26,8 +28,20 @@ class ProductAIController extends Controller
             ], 403);
         }
 
+        $images = array_values(array_filter([
+            $request->file('image'),
+            ...($request->file('images', []) ?? []),
+        ], fn ($file) => $file instanceof \Illuminate\Http\UploadedFile));
+
+        if ($images === []) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please upload at least one product image before analyzing it with AI.',
+            ], 422);
+        }
+
         try {
-            $analysis = $this->aiProductService->analyze($request->file('image'));
+            $analysis = $this->aiProductService->analyze($images);
 
             return response()->json([
                 'success' => true,

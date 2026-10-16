@@ -95,4 +95,9 @@ class User extends Authenticatable
         return $this->hasMany(VoucherUsage::class);
     }
 
+    public function supportConversations()
+    {
+        return $this->hasMany(SupportConversation::class);
+    }
+
 }

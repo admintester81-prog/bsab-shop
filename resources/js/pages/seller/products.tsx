@@ -151,7 +151,6 @@ type ProductForm = {
 type VariantValue = { id: string; value: string };
 type VariantGroup = { id: string; type: string; values: VariantValue[] };
 type VariantCombination = { key: string; label: string; name: string };
-
 const variantTypeOptions = [
     'Size',
     'Weight',
@@ -382,7 +381,6 @@ export default function SellerProducts({ products, categories, monitoring }: { p
     const [sortOrder, setSortOrder] = useState<ProductSort>('newest');
     const [performanceRange, setPerformanceRange] = useState<PerformanceRange>('30 Days');
     const [currentPage, setCurrentPage] = useState(1);
-    const [selectedIds, setSelectedIds] = useState<number[]>([]);
     const [pendingDelete, setPendingDelete] = useState<Product | null>(null);
     const [imageProcessing, setImageProcessing] = useState(false);
     const [imageError, setImageError] = useState('');
@@ -799,12 +797,6 @@ export default function SellerProducts({ products, categories, monitoring }: { p
         link.click();
         URL.revokeObjectURL(url);
     };
-    const toggleSelected = (id: number) => setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
-    const togglePageSelection = () => {
-        const pageIds = visibleProducts.map((product) => product.id);
-        const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
-        setSelectedIds((current) => allSelected ? current.filter((id) => !pageIds.includes(id)) : Array.from(new Set([...current, ...pageIds])));
-    };
     const changeFilter = (setter: (value: string) => void, value: string) => {
         setter(value);
         setCurrentPage(1);
@@ -890,9 +882,8 @@ export default function SellerProducts({ products, categories, monitoring }: { p
                             </label>
                         </div>
                         <div className="mt-2 overflow-x-auto rounded-md border border-[#edf1ee]">
-                            <table className="w-full min-w-[960px] border-collapse text-[9px]">
+                            <table className="w-full min-w-240 border-collapse text-[9px]">
                                 <thead className="bg-[#f7faf8] text-[#63746a]"><tr>
-                                    <th className="w-8 px-2 py-2 text-center"><input type="checkbox" aria-label="Select all products on this page" checked={visibleProducts.length > 0 && visibleProducts.every((product) => selectedIds.includes(product.id))} onChange={togglePageSelection} /></th>
                                     <th className="px-2 py-2 text-left font-semibold">Image</th><th className="px-2 py-2 text-left font-semibold">Product Name</th><th className="px-2 py-2 text-left font-semibold">SKU</th><th className="px-2 py-2 text-left font-semibold">Brand</th><th className="px-2 py-2 text-left font-semibold">Category</th><th className="px-2 py-2 text-left font-semibold">Variant</th><th className="px-2 py-2 text-left font-semibold">Price</th><th className="px-2 py-2 text-center font-semibold">Stock</th><th className="px-2 py-2 text-center font-semibold">Status</th><th className="px-2 py-2 text-right font-semibold">Actions</th>
                                 </tr></thead>
                                 <tbody>
@@ -902,7 +893,6 @@ export default function SellerProducts({ products, categories, monitoring }: { p
                                         const variants = product.variants ?? [];
                                         const variantNames = variants.length ? variants.map((variant) => variant.name) : (product.product_options ?? '').split(/\n|;/).flatMap((group) => group.slice(group.indexOf(':') + 1).split(',')).map((name) => name.trim()).filter(Boolean);
                                         return <tr key={product.id} className={`border-t border-[#edf1ee] hover:bg-[#f9fcfa] ${active ? 'bg-[#f8fcf9]' : ''}`}>
-                                            <td className="px-2 py-2 text-center"><input type="checkbox" aria-label={`Select ${product.name}`} checked={selectedIds.includes(product.id)} onChange={() => toggleSelected(product.id)} /></td>
                                             <td className="px-2 py-2">{image ? <img src={`/storage/${image.path}`} alt={product.name} className="h-10 w-10 rounded-md border border-[#e4ebe6] object-cover" /> : <span className="flex h-10 w-10 items-center justify-center rounded-md bg-[#f4f8f5] text-[#789080]"><ImagePlus size={15} /></span>}</td>
                                             <td className="max-w-32 px-2 py-2"><span className="block truncate font-semibold text-[#263c30]">{product.name}</span><span className="mt-0.5 block text-[8px] text-[#89948d]">{product.model ?? ''}</span></td>
                                             <td className="max-w-32 px-2 py-2 text-[#748178]"><span className="block truncate">{product.sku}</span></td>
@@ -924,7 +914,7 @@ export default function SellerProducts({ products, categories, monitoring }: { p
                             </table>
                         </div>
                         <div className="mt-2 flex flex-col gap-2 text-[8px] text-[#748178] sm:flex-row sm:items-center sm:justify-between">
-                            <span>Showing {matchingProducts.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, matchingProducts.length)} of {matchingProducts.length} products{selectedIds.length > 0 ? ` · ${selectedIds.length} selected` : ''}</span>
+                            <span>Showing {matchingProducts.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, matchingProducts.length)} of {matchingProducts.length} products</span>
                             <div className="flex items-center gap-1.5 self-end sm:self-auto"><button type="button" disabled={page <= 1} onClick={() => setCurrentPage((value) => Math.max(1, value - 1))} className="rounded border border-[#dfe7e1] px-2 py-1 disabled:opacity-40">Previous</button><span className="rounded bg-[#19864b] px-2 py-1 font-semibold text-white">{page}</span><button type="button" disabled={page >= pageCount} onClick={() => setCurrentPage((value) => Math.min(pageCount, value + 1))} className="rounded border border-[#dfe7e1] px-2 py-1 disabled:opacity-40">Next</button></div>
                         </div>
                     </section>
@@ -1407,7 +1397,9 @@ export default function SellerProducts({ products, categories, monitoring }: { p
                                         </div>
                                         <div className="grid gap-4 sm:grid-cols-2">
                                             <label className="block text-sm font-semibold text-[#17352b]">
-                                                Product name <span className="text-[#d9485f]">*</span>
+                                                <span className="flex items-center gap-2">
+                                                    Product name <span className="text-[#d9485f]">*</span>
+                                                </span>
                                                 <input
                                                     value={form.data.name}
                                                     onChange={(event) => form.setData('name', event.target.value)}
@@ -1416,7 +1408,9 @@ export default function SellerProducts({ products, categories, monitoring }: { p
                                                 />
                                             </label>
                                             <label className="block text-sm font-semibold text-[#17352b]">
-                                                Brand
+                                                <span className="flex items-center gap-2">
+                                                    Brand
+                                                </span>
                                                 <input
                                                     value={form.data.brand}
                                                     onChange={(event) => form.setData('brand', event.target.value)}
@@ -1425,7 +1419,9 @@ export default function SellerProducts({ products, categories, monitoring }: { p
                                                 />
                                             </label>
                                             <label className="block text-sm font-semibold text-[#17352b]">
-                                                Product category <span className="text-[#d9485f]">*</span>
+                                                <span className="flex items-center gap-2">
+                                                    Product category <span className="text-[#d9485f]">*</span>
+                                                </span>
                                                 <select
                                                     value={form.data.category_id}
                                                     onChange={(event) => adaptProduct(event.target.value)}
@@ -1442,7 +1438,9 @@ export default function SellerProducts({ products, categories, monitoring }: { p
                                         </div>
 
                                         <label className="mt-4 block text-sm font-semibold text-[#17352b]">
-                                            Description
+                                            <span className="flex items-center gap-2">
+                                                Description
+                                            </span>
                                             <textarea
                                                 value={form.data.description}
                                                 onChange={(event) => form.setData('description', event.target.value)}

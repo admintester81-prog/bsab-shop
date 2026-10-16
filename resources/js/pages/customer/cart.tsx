@@ -213,26 +213,15 @@ export default function CustomerCart() {
     }
 
     async function openCheckout() {
-        setCheckoutLoading(true);
         setNotice('');
-        try {
-            const user = await currentUser();
-            const addresses = (user.addresses || []) as UserAddress[];
-            const saved = addresses.find((a) => a.is_default) || addresses[0];
-            setAddress({
-                full_name: saved?.full_name || user.name || '',
-                phone: saved?.phone || user.phone || '',
-                line1: saved?.line1 || '',
-                city: saved?.city || '',
-                province: saved?.province || '',
-                postal_code: saved?.postal_code || '',
-            });
-            setCheckoutOpen(true);
-        } catch {
-            setNotice('Unable to load your personal information. Please try again.');
-        } finally {
-            setCheckoutLoading(false);
+        if (!selectedItems.length) {
+            setNotice('Select at least one product to continue.');
+            return;
         }
+
+        const params = new URLSearchParams();
+        selectedItems.forEach((item) => params.append('selected_item_ids[]', String(item.id)));
+        router.visit(`${route('customer.checkout')}?${params.toString()}`);
     }
 
     async function submitCheckout(event: React.FormEvent) {

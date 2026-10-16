@@ -49,6 +49,8 @@ class ProfileController extends Controller
                 ? ['required_with:address', 'string', 'in:Negros Occidental']
                 : ['required_with:address', 'string', 'max:255'],
             'address.postal_code' => ['required_with:address', 'string', 'max:20'],
+            'address.latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'address.longitude' => ['nullable', 'numeric', 'between:-180,180'],
         ], [
             'address.city.in' => 'Customer addresses must be in Hinoba-an, Negros Occidental.',
             'address.province.in' => 'Customer addresses must be in Hinoba-an, Negros Occidental.',

@@ -21,6 +21,87 @@ class VoucherCheckoutTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_checkout_allows_pickup_without_a_barangay(): void
+    {
+        Role::findOrCreate('customer', 'web');
+        $customer = User::factory()->create();
+        $customer->assignRole('customer');
+        $seller = User::factory()->create();
+        $shop = Shop::create(['user_id' => $seller->id, 'name' => 'Pickup Shop', 'slug' => 'pickup-shop']);
+        $category = Category::create(['name' => 'Pickup', 'slug' => 'pickup-test']);
+        $product = $this->makeProduct($shop, $category, 'Pickup Product', '250.00');
+        $cart = Cart::create(['user_id' => $customer->id]);
+        CartItem::create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1, 'price_snapshot' => 250]);
+        $address = $this->shippingAddress();
+        unset($address['barangay']);
+
+        $this->actingAs($customer, 'sanctum')
+            ->postJson('/api/customer/checkout', [
+                'shipping_address' => $address,
+                'payment_method' => 'cash_on_delivery',
+                'delivery_option' => 'pickup',
+            ])
+            ->assertCreated();
+
+        $order = Order::query()->where('user_id', $customer->id)->firstOrFail();
+        $this->assertSame('0.00', $order->shipping_fee);
+        $this->assertSame('pickup', $order->shipping_address['delivery_option']);
+        $this->assertArrayNotHasKey('delivery_zone_id', $order->shipping_address);
+    }
+
+    public function test_checkout_allows_pickup_at_an_unconfigured_hinoba_an_location(): void
+    {
+        Role::findOrCreate('customer', 'web');
+        $customer = User::factory()->create();
+        $customer->assignRole('customer');
+        $seller = User::factory()->create();
+        $shop = Shop::create(['user_id' => $seller->id, 'name' => 'Custom Location Shop', 'slug' => 'custom-location-shop']);
+        $category = Category::create(['name' => 'Custom Location', 'slug' => 'custom-location-test']);
+        $product = $this->makeProduct($shop, $category, 'Custom Location Product', '250.00');
+        $cart = Cart::create(['user_id' => $customer->id]);
+        CartItem::create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1, 'price_snapshot' => 250]);
+        $address = $this->shippingAddress();
+        $address['barangay'] = 'Sitio Upper Purok';
+
+        $this->actingAs($customer, 'sanctum')
+            ->postJson('/api/customer/checkout', [
+                'shipping_address' => $address,
+                'payment_method' => 'cash_on_delivery',
+                'delivery_option' => 'pickup',
+            ])
+            ->assertCreated();
+
+        $order = Order::query()->where('user_id', $customer->id)->firstOrFail();
+        $this->assertSame('Sitio Upper Purok', $order->shipping_address['barangay']);
+        $this->assertSame('0.00', $order->shipping_fee);
+        $this->assertArrayNotHasKey('delivery_zone_id', $order->shipping_address);
+    }
+
+    public function test_checkout_requires_a_valid_barangay_zone_for_delivery(): void
+    {
+        Role::findOrCreate('customer', 'web');
+        $customer = User::factory()->create();
+        $customer->assignRole('customer');
+        $seller = User::factory()->create();
+        $shop = Shop::create(['user_id' => $seller->id, 'name' => 'Delivery Shop', 'slug' => 'delivery-shop']);
+        $category = Category::create(['name' => 'Delivery', 'slug' => 'delivery-test']);
+        $product = $this->makeProduct($shop, $category, 'Delivery Product', '250.00');
+        $cart = Cart::create(['user_id' => $customer->id]);
+        CartItem::create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1, 'price_snapshot' => 250]);
+        $this->makeDeliveryZone();
+        $address = $this->shippingAddress();
+        unset($address['barangay']);
+
+        $this->actingAs($customer, 'sanctum')
+            ->postJson('/api/customer/checkout', [
+                'shipping_address' => $address,
+                'payment_method' => 'cash_on_delivery',
+                'delivery_option' => 'local_delivery',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Select a valid barangay delivery zone for delivery, or choose pickup.');
+    }
+
     public function test_product_voucher_only_discounts_eligible_items_and_is_saved_to_order(): void
     {
         Role::findOrCreate('customer', 'web');

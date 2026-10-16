@@ -49,7 +49,11 @@ class CustomerCartController extends Controller
         ]);
 
         $product = Product::with('variants')->findOrFail($data['product_id']);
-        abort_unless($product->status !== 'rejected', 422, 'Product is unavailable or out of stock.');
+        abort_unless(
+            Product::published()->whereKey($product->getKey())->exists(),
+            422,
+            'Product is unavailable or out of stock.',
+        );
 
         $variant = null;
         if (! empty($data['variant_id'])) {

@@ -10,146 +10,103 @@ use Illuminate\Support\Str;
 
 class AIProductService
 {
-    public function analyze(UploadedFile $image): array
+    public function analyze(UploadedFile|array $images): array
     {
-        $apiKey = config('services.gemini.api_key');
+        $normalizedImages = is_array($images) ? $images : [$images];
 
-        if (blank($apiKey)) {
-            throw new \RuntimeException('AI analysis is unavailable because the Gemini API key is not configured.');
+        if ($normalizedImages === []) {
+            throw new \RuntimeException('Please upload at least one product image before analyzing it with AI.');
         }
 
-        $mimeType = $image->getMimeType();
-        $supportedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+        foreach ($normalizedImages as $image) {
+            $mimeType = $image->getMimeType();
+            $supportedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
-        if (! $image->isValid() || ! in_array($mimeType, $supportedMimeTypes, true)) {
-            throw new \RuntimeException('Invalid image file. Please upload a JPG, JPEG, PNG, or WebP image.');
-        }
-
-        $lastError = null;
-
-        $models = array_unique(array_filter([
-            config('services.gemini.model'),
-            config('services.gemini.fallback_model'),
-            'gemini-flash-latest',
-            'gemini-2.5-flash',
-            'gemini-2.5-flash-lite',
-            'gemini-2.0-flash',
-        ]));
-
-        foreach ($models as $model) {
-            try {
-                return $this->requestGeminiAnalysis($image, $model, $apiKey);
-            } catch (\Throwable $exception) {
-                $lastError = $exception;
-
-                if ($this->shouldRetryModel($exception, $model)) {
-                    continue;
-                }
-
-                throw $exception;
+            if (! $image->isValid() || ! in_array($mimeType, $supportedMimeTypes, true)) {
+                throw new \RuntimeException('Invalid image file. Please upload a JPG, JPEG, PNG, or WebP image.');
             }
         }
 
-        throw $lastError ?? new \RuntimeException('Unable to analyze this image right now. Please try again.');
+        $baseUrl = rtrim((string) config('services.ollama.base_url', config('services.ollama.url', 'http://127.0.0.1:11434')), '/');
+        $visionModel = trim((string) config('services.ollama.vision_model', 'moondream:1.8b'));
+        $timeout = (int) config('services.ollama.timeout', 120);
+
+        if ($visionModel === '') {
+            throw new \RuntimeException('Ollama vision model is not configured. Set OLLAMA_VISION_MODEL in your environment.');
+        }
+
+        return $this->requestOllamaAnalysis($normalizedImages, $baseUrl, $visionModel, $timeout);
     }
 
-    private function requestGeminiAnalysis(UploadedFile $image, string $model, string $apiKey): array
+    private function requestOllamaAnalysis(array $images, string $baseUrl, string $model, int $timeout): array
     {
+        $phpExecutionLimit = (int) ini_get('max_execution_time');
+
+        if ($phpExecutionLimit !== 0 && $phpExecutionLimit <= $timeout) {
+            set_time_limit($timeout + 10);
+        }
+
+        $payload = [
+            'model' => $model,
+            'stream' => false,
+            'keep_alive' => '10m',
+            'options' => [
+                'num_ctx' => 2048,
+                'num_predict' => 512,
+            ],
+            'messages' => [[
+                'role' => 'user',
+                'content' => $this->buildPrompt(),
+                'images' => array_map(fn (UploadedFile $image) => base64_encode($image->getContent()), $images),
+            ]],
+        ];
+
         $response = Http::acceptJson()
-            ->timeout(60)
+            ->timeout($timeout)
             ->connectTimeout(10)
-            ->withHeaders([
-                'x-goog-api-key' => $apiKey,
-                'Content-Type' => 'application/json',
-            ])
-            ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent", [
-                'contents' => [
-                    [
-                        'parts' => [
-                            [
-                                'text' => $this->buildPrompt(),
-                            ],
-                            [
-                                'inline_data' => [
-                                    'mime_type' => $image->getMimeType(),
-                                    'data' => base64_encode($image->getContent()),
-                                ],
-                            ],
-                        ],
-                    ],
-                ],
-            ]);
+            ->post($baseUrl.'/api/chat', $payload);
 
         if (! $response->successful()) {
             $status = $response->status();
-            $responseBody = $this->safeErrorBody($response->body());
-            $message = $this->mapHttpError($status, $responseBody);
+            $message = $this->mapOllamaError($status, $response->body());
 
-            Log::error('Gemini AI Error', [
+            Log::error('Ollama AI Error', [
                 'model' => $model,
                 'status' => $status,
                 'message' => $message,
-                'response_body' => $responseBody,
+                'response_body' => $response->body(),
             ]);
 
             throw new \RuntimeException($message);
         }
 
         $payload = $response->json();
-        $text = $this->extractResponseText($payload);
+        $text = $this->extractOllamaResponseText($payload);
 
         return $this->normalizeAnalysis($this->parseJson($text));
     }
 
-    private function shouldRetryModel(\Throwable $exception, string $model): bool
-    {
-        $message = strtolower($exception->getMessage());
-
-        return str_contains($message, 'model')
-            || str_contains($message, 'not available')
-            || str_contains($message, 'unsupported');
-    }
-
-    private function safeErrorBody(string $body): string
-    {
-        $trimmed = trim($body);
-
-        return mb_substr($trimmed, 0, 500);
-    }
-
-    private function mapHttpError(int $status, string $responseBody): string
+    private function mapOllamaError(int $status, string $responseBody): string
     {
         $normalizedBody = strtolower($responseBody);
 
-        if (str_contains($normalizedBody, 'api key not valid') || str_contains($normalizedBody, 'api_key_invalid')) {
-            return 'Gemini API key is invalid or unavailable. Please check the configured API key.';
+        if ($status === 404 || str_contains($normalizedBody, 'model') && str_contains($normalizedBody, 'not found')) {
+            return 'Ollama could not find the configured vision model. Pull the model locally or update OLLAMA_VISION_MODEL.';
         }
 
-        if ($status === 401) {
-            return 'Gemini API access is not authorized. Please check the API key and project permissions.';
-        }
-
-        if ($status === 403) {
-            return 'Gemini access is forbidden. Check that the API key is valid, the Generative Language API is enabled for its Google project, and the key allows Gemini requests.';
-        }
-
-        if ($status === 400) {
-            return 'The Gemini request was invalid. Please try again with a valid product image.';
-        }
-
-        if ($status === 404) {
-            return 'Gemini model is unavailable for this project. Please use a supported free-tier multimodal model.';
-        }
-
-        if ($status === 429) {
-            return 'Gemini API rate limit reached. Please try again in a moment.';
+        if ($status === 0 || str_contains($normalizedBody, 'connection refused') || str_contains($normalizedBody, 'failed to connect')) {
+            return 'Ollama is unavailable. Please start the local Ollama service and confirm OLLAMA_BASE_URL is correct.';
         }
 
         if ($status >= 500) {
-            return 'Gemini API is temporarily unavailable. Please try again in a moment.';
+            return 'Ollama is temporarily unavailable. Please try again in a moment.';
         }
 
-        return 'Unable to analyze this image right now. Please try again.';
+        if (str_contains($normalizedBody, 'invalid image') || str_contains($normalizedBody, 'unsupported')) {
+            return 'The uploaded product image could not be processed by the selected Ollama vision model. Please try a different JPG, PNG, or WebP image.';
+        }
+
+        return 'Unable to analyze this image with Ollama right now. Please try again or enter the product information manually.';
     }
 
     private function buildPrompt(): string
@@ -189,17 +146,15 @@ Rules:
 PROMPT;
     }
 
-    private function extractResponseText(array $payload): string
+    private function extractOllamaResponseText(array $payload): string
     {
-        $parts = data_get($payload, 'candidates.0.content.parts', []);
+        $content = data_get($payload, 'message.content');
 
-        foreach ($parts as $part) {
-            if (isset($part['text']) && is_string($part['text']) && trim($part['text']) !== '') {
-                return $part['text'];
-            }
+        if (is_string($content) && trim($content) !== '') {
+            return $content;
         }
 
-        throw new \RuntimeException('Gemini returned an invalid response.');
+        throw new \RuntimeException('Ollama returned an invalid response.');
     }
 
     private function parseJson(string $text): array
@@ -213,7 +168,7 @@ PROMPT;
         $decoded = json_decode($json, true);
 
         if (! is_array($decoded)) {
-            throw new \RuntimeException('Gemini returned a malformed JSON response.');
+            throw new \RuntimeException('Ollama returned a malformed JSON response.');
         }
 
         return $decoded;

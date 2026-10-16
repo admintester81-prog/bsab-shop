@@ -1,4 +1,5 @@
 import { Heart, Star } from 'lucide-react';
+import type { CSSProperties } from 'react';
 
 interface Product {
     id: number;
@@ -22,13 +23,14 @@ interface ProductCardProps {
     liked: boolean;
     onToggleFavorite: () => void;
     onOpenProduct: () => void;
+    style?: CSSProperties;
 }
 
 const imageUrl = (path?: string | null) => (path ? (path.startsWith('http') || path.startsWith('/') ? path : `/storage/${path}`) : null);
 
 const money = (value: string | number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(Number(value));
 
-export default function ProductCard({ product, liked, onToggleFavorite, onOpenProduct }: ProductCardProps) {
+export default function ProductCard({ product, liked, onToggleFavorite, onOpenProduct, style }: ProductCardProps) {
     const image = imageUrl(product.images?.[0]?.path);
     const price = product.sale_price ?? product.base_price;
     const isSale = !!product.sale_price && Number(product.sale_price) < Number(product.base_price);
@@ -63,6 +65,7 @@ export default function ProductCard({ product, liked, onToggleFavorite, onOpenPr
             }}
             role="link"
             tabIndex={0}
+            style={style}
         >
             <div className="card-media">
                 {image ? (
@@ -77,7 +80,7 @@ export default function ProductCard({ product, liked, onToggleFavorite, onOpenPr
                         onToggleFavorite();
                     }}
                     aria-label={liked ? `Remove ${product.name} from favorites` : `Add ${product.name} to favorites`}
-                    className={`fav-chip${liked ? 'active' : ''}`}
+                    className={`fav-chip${liked ? ' active' : ''}`}
                     aria-pressed={liked}
                 >
                     <Heart size={15} fill={liked ? '#2c9350' : 'none'} />

@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Services\VoucherService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class AdminOrderController extends Controller
@@ -101,7 +103,18 @@ class AdminOrderController extends Controller
             'status' => ['required', Rule::in(['pending', 'processing', 'accepted', 'shipped', 'delivered', 'cancelled'])],
         ]);
 
-        $order->update(['status' => $data['status']]);
+        DB::transaction(function () use ($order, $data) {
+            $order->update(['status' => $data['status']]);
+            $order->items()->update([
+                'fulfillment_status' => $data['status'] === 'pending'
+                    ? 'processing'
+                    : $data['status'],
+            ]);
+
+            if ($data['status'] === 'cancelled') {
+                app(VoucherService::class)->releaseUsageForCancelledOrder($order);
+            }
+        });
 
         return response()->json($order->fresh()->load([
             'user:id,name,email',

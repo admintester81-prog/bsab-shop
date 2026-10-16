@@ -112,22 +112,20 @@ export default function AdminShipping({
             estimated_delivery_max: zoneForm.data.estimated_delivery_max || null,
         };
         if (editingId) {
-            zoneForm
-                .transform(() => values)
-                .put(route('admin.shipping.zones.update', editingId), {
-                    preserveScroll: true,
-                    onSuccess: () => setShowForm(false),
-                });
+            zoneForm.transform(() => values);
+            zoneForm.put(route('admin.shipping.zones.update', editingId), {
+                preserveScroll: true,
+                onSuccess: () => setShowForm(false),
+            });
         } else {
-            zoneForm
-                .transform(() => values)
-                .post(route('admin.shipping.zones.store'), {
-                    preserveScroll: true,
-                    onSuccess: () => {
-                        setShowForm(false);
-                        zoneForm.reset();
-                    },
-                });
+            zoneForm.transform(() => values);
+            zoneForm.post(route('admin.shipping.zones.store'), {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setShowForm(false);
+                    zoneForm.reset();
+                },
+            });
         }
     }
 

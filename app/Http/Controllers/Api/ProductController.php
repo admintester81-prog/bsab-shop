@@ -18,7 +18,7 @@ class ProductController extends Controller
 
     public function show(Product $product)
     {
-        abort_unless($product->status !== 'rejected', 404);
+        abort_unless(Product::published()->whereKey($product->getKey())->exists(), 404);
 
         return $product->load([
             'shop',

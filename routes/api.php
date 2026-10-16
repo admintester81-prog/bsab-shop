@@ -4,9 +4,12 @@ use App\Http\Controllers\Api\AdminOrderController;
 use App\Http\Controllers\Api\AdminSellerController;
 use App\Http\Controllers\Api\CheckoutController;
 use App\Http\Controllers\Api\CustomerCartController;
+use App\Http\Controllers\Api\CustomerLocationGeocodingController;
+use App\Http\Controllers\Api\CustomerProductReviewController;
 use App\Http\Controllers\Api\CustomerVoucherController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\SellerProductController;
+use App\Http\Controllers\Api\SupportConversationController;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Services\VoucherService;
@@ -15,9 +18,13 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('products', [ProductController::class, 'index']);
 Route::get('products/{product}', [ProductController::class, 'show']);
+Route::get('support/assistant/status', [SupportConversationController::class, 'assistantStatus'])->middleware('throttle:30,1');
+Route::post('support/assistant', [SupportConversationController::class, 'guestAssistant'])->middleware('throttle:10,1');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('user', fn (Request $request) => $request->user()->load('roles', 'shop', 'addresses'));
+    Route::get('support/conversation', [SupportConversationController::class, 'show']);
+    Route::post('support/conversation/messages', [SupportConversationController::class, 'store'])->middleware('throttle:5,1');
 
     Route::middleware('role:admin')->prefix('admin')->group(function () {
         Route::get('orders', [AdminOrderController::class, 'index']);
@@ -49,6 +56,8 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('role:customer')->prefix('customer')->group(function () {
+        Route::get('location/search', [CustomerLocationGeocodingController::class, 'search'])->middleware('throttle:60,1');
+        Route::get('location/reverse', [CustomerLocationGeocodingController::class, 'reverse'])->middleware('throttle:60,1');
         Route::get('cart', [CustomerCartController::class, 'show']);
         Route::post('cart/items', [CustomerCartController::class, 'store']);
         Route::patch('cart/items/{item}', [CustomerCartController::class, 'update']);
@@ -59,7 +68,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('cart/voucher', [CustomerVoucherController::class, 'remove']);
         Route::post('vouchers/{voucher}/claim', [CustomerVoucherController::class, 'claim']);
         Route::post('checkout', [CheckoutController::class, 'store']);
-        Route::get('orders', fn (Request $request) => $request->user()->orders()->with('items.product.images', 'items.shop')->latest()->paginate(20));
-        Route::get('orders/{order}', fn (Request $request, Order $order) => abort_unless($order->user_id === $request->user()->id, 403) ?: $order->load('items.product.images', 'items.shop', 'payments'));
+        Route::get('orders', fn (Request $request) => $request->user()->orders()->with('items.product.images', 'items.shop', 'items.variant', 'items.review')->latest()->paginate(20));
+        Route::get('orders/{order}', fn (Request $request, Order $order) => abort_unless($order->user_id === $request->user()->id, 403) ?: $order->load('items.product.images', 'items.shop', 'items.variant', 'items.review', 'payments'));
+        Route::post('order-items/{item}/review', [CustomerProductReviewController::class, 'store']);
     });
 });

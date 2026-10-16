@@ -302,6 +302,12 @@ export default function ResponsiveProductDetail({
                                             <UserRound size={16} /> Profile
                                         </Link>
                                         <Link
+                                            href={route('customer.orders')}
+                                            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
+                                        >
+                                            <Package size={16} /> My orders
+                                        </Link>
+                                        <Link
                                             href={route('customer.settings')}
                                             className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
                                         >
@@ -371,6 +377,12 @@ export default function ResponsiveProductDetail({
                                                 className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
                                             >
                                                 <UserRound size={16} /> Profile
+                                            </Link>
+                                            <Link
+                                                href={route('customer.orders')}
+                                                className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
+                                            >
+                                                <Package size={16} /> My orders
                                             </Link>
                                             <Link
                                                 href={route('customer.settings')}

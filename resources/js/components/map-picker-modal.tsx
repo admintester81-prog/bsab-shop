@@ -1,6 +1,7 @@
 import 'leaflet/dist/leaflet.css';
+import { api, getApiErrorMessage } from '@/lib/api';
 import L from 'leaflet';
-import { AlertCircle, Check, Crosshair, Loader2, MapPin, Search, X } from 'lucide-react';
+import { AlertCircle, Check, Crosshair, Layers3, Loader2, MapPin, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 interface SelectedLocation {
@@ -23,6 +24,8 @@ interface MapPickerModalProps {
         city?: string;
         province?: string;
         postal_code?: string;
+        latitude?: number | null;
+        longitude?: number | null;
     };
     deliveryBarangays?: string[];
     onSelectLocation: (location: SelectedLocation) => void;
@@ -45,17 +48,45 @@ const createCustomPinIcon = () =>
     });
 
 function isHinobaAnAddress(address: Record<string, string | undefined>) {
-    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z]/g, '');
-    const localities = [address.city, address.town, address.municipality, address.village, address.county, address.city_district]
+    const normalize = (value: string) =>
+        value
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '');
+    const localities = [
+        address.city,
+        address.town,
+        address.municipality,
+        address.village,
+        address.county,
+        address.city_district,
+        address.state_district,
+        address.district,
+    ]
         .filter((value): value is string => Boolean(value))
         .map(normalize);
-    const provinces = [address.province, address.state, address.region]
+    const provinces = [
+        address.province,
+        address.state,
+        address.region,
+        address.county,
+        address.state_district,
+        address['ISO3166-2-lvl4'],
+    ]
         .filter((value): value is string => Boolean(value))
         .map(normalize);
+    const country = address.country ? normalize(address.country) : '';
 
     return (
         localities.includes('hinobaan') &&
-        (provinces.includes('negrosoccidental') || provinces.includes('negrosislandregion'))
+        (!country || country === 'philippines' || country === 'pilipinas') &&
+        (provinces.includes('negrosoccidental') ||
+            provinces.includes('negrosislandregion') ||
+            provinces.includes('westernvisayas') ||
+            provinces.includes('regionvi') ||
+            provinces.includes('ph06') ||
+            provinces.length === 0)
     );
 }
 
@@ -71,10 +102,13 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
     const mapContainerRef = useRef<HTMLDivElement | null>(null);
     const mapInstanceRef = useRef<L.Map | null>(null);
     const markerRef = useRef<L.Marker | null>(null);
+    const tileLayerRef = useRef<L.TileLayer | null>(null);
 
     const [searchQuery, setSearchQuery] = useState('');
+    const [mapMode, setMapMode] = useState<'street' | 'satellite'>('street');
     const [isSearching, setIsSearching] = useState(false);
     const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
+    const [lookupError, setLookupError] = useState('');
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const [isSupportedLocation, setIsSupportedLocation] = useState(false);
     const [isSupportedBarangay, setIsSupportedBarangay] = useState(false);
@@ -91,20 +125,12 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
         lng: 122.4670994,
     });
 
-    // Reverse geocode lat/lng to address parts via OpenStreetMap Nominatim
+    // Reverse geocode through the authenticated app endpoint to avoid browser cross-origin blocking.
     async function reverseGeocode(lat: number, lng: number) {
         setIsReverseGeocoding(true);
+        setLookupError('');
         try {
-            const response = await fetch(
-                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
-                {
-                    headers: {
-                        'Accept-Language': 'en',
-                    },
-                }
-            );
-            if (!response.ok) throw new Error('Geocoding failed');
-            const data = await response.json();
+            const { data } = await api.get('/customer/location/reverse', { params: { lat, lon: lng } });
             const addr = data.address || {};
             const isSupported = isHinobaAnAddress(addr);
             const rawBarangay = getBarangay(addr);
@@ -133,7 +159,8 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
             });
             setIsSupportedLocation(isSupported);
             setIsSupportedBarangay(Boolean(rawBarangay));
-        } catch {
+        } catch (error: unknown) {
+            setLookupError(getApiErrorMessage(error, 'Unable to look up this location. Try again or choose another point on the map.'));
             setSelectedLocation((prev) => ({
                 ...prev,
                 barangay: '',
@@ -150,22 +177,16 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
         }
     }
 
-    // Search place via Nominatim
+    // Search through the authenticated app endpoint to avoid browser cross-origin blocking.
     async function handleSearch(e?: React.FormEvent) {
         if (e) e.preventDefault();
         const trimmed = searchQuery.trim();
         if (!trimmed) return;
 
         setIsSearching(true);
+        setLookupError('');
         try {
-            const res = await fetch(
-                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&countrycodes=ph&limit=5&addressdetails=1`,
-                {
-                    headers: { 'Accept-Language': 'en' },
-                }
-            );
-            if (!res.ok) throw new Error('Search failed');
-            const results = await res.json();
+            const { data: results } = await api.get('/customer/location/search', { params: { query: trimmed } });
             setSearchResults(results);
 
             if (results && results.length > 0) {
@@ -173,9 +194,12 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
                 const lat = parseFloat(first.lat);
                 const lon = parseFloat(first.lon);
                 moveToCoordinates(lat, lon, 16);
+            } else {
+                setLookupError('No matching locations found. Try a street, landmark, or barangay in Hinoba-an.');
             }
-        } catch {
+        } catch (error: unknown) {
             setSearchResults([]);
+            setLookupError(getApiErrorMessage(error, 'Location search is temporarily unavailable. Please try again.'));
         } finally {
             setIsSearching(false);
         }
@@ -214,7 +238,9 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
             if (mapInstanceRef.current) {
                 mapInstanceRef.current.remove();
                 mapInstanceRef.current = null;
+                tileLayerRef.current = null;
             }
+            setMapMode('street');
             return;
         }
 
@@ -222,8 +248,11 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
         const timer = setTimeout(() => {
             if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-            const initialLat = 9.6021766;
-            const initialLng = 122.4670994;
+            const hasSavedCoordinates =
+                Number.isFinite(initialAddress?.latitude) &&
+                Number.isFinite(initialAddress?.longitude);
+            const initialLat = hasSavedCoordinates ? Number(initialAddress?.latitude) : 9.6021766;
+            const initialLng = hasSavedCoordinates ? Number(initialAddress?.longitude) : 122.4670994;
 
             const map = L.map(mapContainerRef.current, {
                 center: [initialLat, initialLng],
@@ -233,10 +262,11 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
 
             L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            const streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
                 maxZoom: 19,
             }).addTo(map);
+            tileLayerRef.current = streetTiles;
 
             const pinIcon = createCustomPinIcon();
             const marker = L.marker([initialLat, initialLng], {
@@ -256,28 +286,30 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
 
             mapInstanceRef.current = map;
             markerRef.current = marker;
+            window.requestAnimationFrame(() => map.invalidateSize(true));
 
             // If initial address exists, search and locate it
             const addressString = [initialAddress?.line1, initialAddress?.barangay, initialAddress?.city, initialAddress?.province]
                 .filter(Boolean)
                 .join(', ');
 
-            if (addressString) {
-                fetch(
-                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressString)}&countrycodes=ph&limit=1`,
-                    { headers: { 'Accept-Language': 'en' } }
-                )
-                    .then((r) => r.json())
-                    .then((results) => {
-                        if (results && results.length > 0) {
-                            const lat = parseFloat(results[0].lat);
-                            const lon = parseFloat(results[0].lon);
-                            moveToCoordinates(lat, lon, 15);
-                        } else {
+            if (hasSavedCoordinates) {
+                map.setView([initialLat, initialLng], 17);
+                reverseGeocode(initialLat, initialLng);
+            } else if (addressString) {
+                api.get('/customer/location/search', { params: { query: addressString } })
+                    .then(({ data: results }) => {
+                        if (!results?.length) {
+                            setLookupError('Could not find the saved address. Search for a nearby street or move the map pin.');
                             reverseGeocode(initialLat, initialLng);
+                            return;
                         }
+                        const lat = Number(results[0].lat);
+                        const lon = Number(results[0].lon);
+                        moveToCoordinates(lat, lon, 15);
                     })
-                    .catch(() => {
+                    .catch((error: unknown) => {
+                        setLookupError(getApiErrorMessage(error, 'Could not find the saved address. Search for a nearby street or move the map pin.'));
                         reverseGeocode(initialLat, initialLng);
                     });
             } else {
@@ -290,9 +322,33 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
             if (mapInstanceRef.current) {
                 mapInstanceRef.current.remove();
                 mapInstanceRef.current = null;
+                tileLayerRef.current = null;
             }
         };
     }, [isOpen]);
+
+    function switchMapMode(mode: 'street' | 'satellite') {
+        const map = mapInstanceRef.current;
+        if (!map || mapMode === mode) return;
+
+        if (tileLayerRef.current) {
+            map.removeLayer(tileLayerRef.current);
+        }
+
+        tileLayerRef.current =
+            mode === 'satellite'
+                ? L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                      attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+                      maxZoom: 19,
+                  })
+                : L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                      maxZoom: 19,
+                  });
+        tileLayerRef.current.addTo(map);
+        window.requestAnimationFrame(() => map.invalidateSize(true));
+        setMapMode(mode);
+    }
 
     if (!isOpen) return null;
 
@@ -370,6 +426,14 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
                             <Crosshair size={14} />
                             <span className="hidden md:inline">Locate Me</span>
                         </button>
+                        <div className="inline-flex shrink-0 items-center rounded-full border border-[#dfeae2] bg-[#f5fcf7] p-0.5" role="group" aria-label="Map style">
+                            <button type="button" onClick={() => switchMapMode('street')} aria-pressed={mapMode === 'street'} className={`rounded-full px-2.5 py-1.5 text-[11px] font-semibold transition ${mapMode === 'street' ? 'bg-[#23834b] text-white' : 'text-[#1f7a42] hover:bg-white'}`}>
+                                Map
+                            </button>
+                            <button type="button" onClick={() => switchMapMode('satellite')} aria-pressed={mapMode === 'satellite'} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-semibold transition ${mapMode === 'satellite' ? 'bg-[#23834b] text-white' : 'text-[#1f7a42] hover:bg-white'}`}>
+                                <Layers3 size={12} /> Satellite
+                            </button>
+                        </div>
                     </form>
 
                     {/* Search Suggestions dropdown */}
@@ -393,6 +457,11 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
                                 </button>
                             ))}
                         </div>
+                    )}
+                    {lookupError && (
+                        <p role="alert" className="mt-2 rounded-lg bg-[#fff3f1] px-3 py-2 text-xs font-semibold text-[#a63d36]">
+                            {lookupError}
+                        </p>
                     )}
                 </div>
 
@@ -436,10 +505,25 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
                                     Choose a location within Hinoba-an, Negros Occidental.
                                 </p>
                             )}
+                            {isSupportedLocation && (
+                                <label className="mt-2 block max-w-sm text-[11px] font-semibold text-[#315843]">
+                                    Barangay / sitio
+                                    <input
+                                        value={selectedLocation.barangay}
+                                        onChange={(event) => {
+                                            const barangay = event.target.value;
+                                            setSelectedLocation((current) => ({ ...current, barangay }));
+                                            setIsSupportedBarangay(Boolean(barangay.trim()));
+                                        }}
+                                        placeholder="Enter your barangay or sitio"
+                                        className="mt-1 w-full rounded-lg border border-[#dfeae2] bg-white px-3 py-2 text-xs font-normal text-[#173b2a] outline-none focus:border-[#2c9350] focus:ring-2 focus:ring-[#2c9350]/15"
+                                    />
+                                </label>
+                            )}
                             {isSupportedLocation && !isSupportedBarangay && (
                                 <p className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-[#b3413a]">
                                     <AlertCircle size={12} />
-                                    Move the pin to a location with a detected barangay.
+                                    Enter your barangay or sitio to confirm this address.
                                 </p>
                             )}
                         </div>
@@ -453,7 +537,7 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
                             </button>
                             <button
                                 type="button"
-                                disabled={!isSupportedLocation || !isSupportedBarangay || isReverseGeocoding}
+                                disabled={!isSupportedLocation || !selectedLocation.barangay.trim() || isReverseGeocoding}
                                 onClick={() => {
                                     onSelectLocation(selectedLocation);
                                     onClose();

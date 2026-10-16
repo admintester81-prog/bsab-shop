@@ -51,6 +51,8 @@ class CustomerAddressLocalityTest extends TestCase
 
         $address['city'] = 'Hinoba-an';
         $address['province'] = 'Negros Occidental';
+        $address['latitude'] = 9.5928123;
+        $address['longitude'] = 122.4687456;
 
         $this->actingAs($customer)
             ->patch(route('profile.update'), [
@@ -65,6 +67,8 @@ class CustomerAddressLocalityTest extends TestCase
             'barangay' => 'Poblacion',
             'city' => 'Hinoba-an',
             'province' => 'Negros Occidental',
+            'latitude' => '9.5928123',
+            'longitude' => '122.4687456',
         ]);
 
         $address['barangay'] = 'Unlisted Barangay';

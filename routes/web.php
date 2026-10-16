@@ -17,6 +17,7 @@ use App\Http\Controllers\SellerProductController;
 use App\Http\Controllers\SellerShopController;
 use App\Http\Controllers\TestGeminiImageController;
 use App\Http\Controllers\FooterPageController;
+use App\Http\Controllers\HelpCenterController;
 use App\Http\Controllers\VoucherManagementController;
 use App\Services\VoucherService;
 use App\Http\Middleware\RequestDeviceModelHint;
@@ -82,7 +83,10 @@ $extractGeminiDiagnosticError = function (mixed $payload, int $status): string {
 
 $storefrontProps = fn (?int $userId = null) => [
     'siteSettings' => SiteSetting::homeSettings(),
-    'categories' => Category::query()->withCount('products')->orderBy('name')->get(['id', 'name', 'slug', 'image']),
+    'categories' => Category::query()
+        ->withCount(['products' => fn ($query) => $query->published()])
+        ->orderBy('name')
+        ->get(['id', 'name', 'slug', 'image']),
     'products' => Product::published()
         ->with(['shop:id,name', 'category:id,name,slug', 'images' => fn ($query) => $query->where('is_primary', true)->limit(1)])
         ->withSum(['variants as active_variant_stock' => fn ($query) => $query->where('is_active', true)], 'stock_quantity')
@@ -122,6 +126,7 @@ Route::get('/', function (Request $request) use ($storefrontProps) {
 })->name('home');
 
 Route::get('/marketplace', fn () => Inertia::render('customer/marketplace', $storefrontProps()))->name('marketplace');
+Route::get('/pages/help-center', [HelpCenterController::class, 'show'])->name('pages.help-center');
 Route::post('/pages/contact-us', [FooterPageController::class, 'submitContact'])
     ->middleware('throttle:5,1')
     ->name('footer-pages.contact');
@@ -236,7 +241,7 @@ Route::get('/test-gemini', function () use ($extractGeminiDiagnosticError) {
 })->name('test.gemini');
 
 Route::get('/products/{product}', function (Request $request, Product $product, VoucherService $vouchers) {
-    abort_unless($product->status !== 'rejected', 404);
+    abort_unless(Product::published()->whereKey($product->getKey())->exists(), 404);
 
     $withMetrics = Schema::hasTable('product_metrics');
     $similarProductRelations = [
@@ -453,11 +458,25 @@ Route::middleware(['auth', 'role:customer'])->prefix('customer')->group(function
     })->name('customer.categories.show');
     Route::get('/favorites', function (Request $request) {
         return Inertia::render('customer/favorites', [
-            'products' => Product::query()
+            'products' => Product::published()
                 ->whereHas('wishlists', fn ($query) => $query->where('user_id', $request->user()->id))
                 ->with(['shop:id,name', 'category:id,name,slug', 'images' => fn ($query) => $query->where('is_primary', true)->limit(1)])
+                ->withSum(['variants as active_variant_stock' => fn ($query) => $query->where('is_active', true)], 'stock_quantity')
+                ->withAvg('reviews', 'rating')
+                ->withCount('reviews')
                 ->latest()
-                ->get(),
+                ->get()
+                ->map(function (Product $product) {
+                    $availableStock = (int) ($product->active_variant_stock ?? 0);
+
+                    return array_merge($product->toArray(), [
+                        'available_stock' => $availableStock,
+                        'is_out_of_stock' => $availableStock < 1,
+                        'average_rating' => $product->reviews_avg_rating ? round((float) $product->reviews_avg_rating, 1) : 0,
+                        'review_count' => (int) $product->reviews_count,
+                    ]);
+                })
+                ->values(),
         ]);
     })->name('customer.favorites');
     Route::delete('/favorites', function (Request $request) {
@@ -509,7 +528,11 @@ Route::middleware(['auth', 'role:customer'])->prefix('customer')->group(function
             'available' => $vouchers->availableForCustomer($request->user()),
         ]))->name('customer.vouchers');
     Route::get('/order-tracking', fn () => Inertia::render('customer/order-tracking'))->name('customer.order-tracking');
-    Route::get('/orders/{order}', fn (Request $request, Order $order) => abort_unless($order->user_id === $request->user()->id, 403) ?: Inertia::render('customer/order-detail', ['orderId' => $order->id]))->name('customer.order');
+    Route::get('/orders/{order}', function (Request $request, Order $order) {
+        abort_unless($order->user_id === $request->user()->id, 403);
+
+        return redirect()->route('customer.order-tracking', ['order_id' => $order->id]);
+    })->name('customer.order');
 });
 
 Route::middleware('auth')->prefix('settings')->group(function () {

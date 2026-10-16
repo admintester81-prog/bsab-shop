@@ -441,6 +441,12 @@ function CustomerLayout({
                                         <UserRound size={16} /> Profile
                                     </Link>
                                     <Link
+                                        href="/customer/orders"
+                                        className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
+                                    >
+                                        <Package size={16} /> My orders
+                                    </Link>
+                                    <Link
                                         href="/customer/settings"
                                         className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
                                     >
@@ -566,6 +572,12 @@ function CustomerLayout({
                                             className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
                                         >
                                             <UserRound size={16} /> Profile
+                                        </Link>
+                                        <Link
+                                            href="/customer/orders"
+                                            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
+                                        >
+                                            <Package size={16} /> My orders
                                         </Link>
                                         <Link
                                             href="/customer/settings"

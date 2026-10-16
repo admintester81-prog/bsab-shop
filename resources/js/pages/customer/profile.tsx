@@ -56,6 +56,8 @@ export default function CustomerProfile() {
                 city: string;
                 province: string;
                 postal_code: string;
+                latitude?: number | null;
+                longitude?: number | null;
             };
             avatarUrl?: string | null;
             cartCount?: number;
@@ -84,6 +86,8 @@ export default function CustomerProfile() {
             city: 'Hinoba-an',
             province: 'Negros Occidental',
             postal_code: address?.postal_code ?? '',
+            latitude: address?.latitude ?? null,
+            longitude: address?.longitude ?? null,
         },
     });
 
@@ -680,7 +684,7 @@ export default function CustomerProfile() {
                                                         label="Address Line"
                                                         value={data.address.line1}
                                                         editable={isEditingAddress}
-                                                        onChange={(value) => setData('address', { ...data.address, line1: value })}
+                                                        onChange={(value) => setData('address', { ...data.address, line1: value, latitude: null, longitude: null })}
                                                         error={errors['address.line1']}
                                                     />
                                                     <label className="block text-xs font-semibold text-[#5c6e63]">
@@ -1051,6 +1055,8 @@ export default function CustomerProfile() {
                         city: loc.city || data.address.city,
                         province: loc.province || data.address.province,
                         postal_code: loc.postal_code || data.address.postal_code,
+                        latitude: loc.lat,
+                        longitude: loc.lng,
                     });
                     setIsEditingAddress(true);
                 }}

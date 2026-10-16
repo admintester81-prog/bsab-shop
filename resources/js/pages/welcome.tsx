@@ -203,9 +203,14 @@ export default function Welcome({
         router.post(route('customer.favorites.toggle', productId), {}, { preserveScroll: true });
     }
 
+    function openProducts() {
+        const query = search.trim();
+        router.get(route('customer.products'), query ? { q: query } : {}, { preserveState: false, viewTransition: true });
+    }
+
     function submitSearch(event: React.FormEvent) {
         event.preventDefault();
-        router.get(route('customer.products'), { q: search.trim() }, { preserveState: true });
+        openProducts();
     }
 
     return (
@@ -264,8 +269,10 @@ export default function Welcome({
                             <input
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
+                                onClick={openProducts}
                                 placeholder="Search for products, brands and more..."
-                                className="w-full bg-transparent text-sm outline-none placeholder:text-[#5c6e63] min-[430px]:max-[640px]:text-xs"
+                                aria-label="Search products"
+                                className="w-full cursor-pointer bg-transparent text-sm outline-none placeholder:text-[#5c6e63] min-[430px]:max-[640px]:text-xs"
                             />
                             {search && (
                                 <button type="button" onClick={() => setSearch('')} aria-label="Clear search" className="text-[#5c6e63] hover:text-[#173b2a]">
@@ -327,6 +334,13 @@ export default function Welcome({
                                                 className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
                                             >
                                                 <UserRound size={16} /> Profile
+                                            </Link>
+                                            <hr className="my-1 border-[#def0e2]" />
+                                            <Link
+                                                href={route('customer.orders')}
+                                                className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
+                                            >
+                                                <Package size={16} /> My orders
                                             </Link>
                                             <hr className="my-1 border-[#def0e2]" />
                                             <Link
@@ -412,6 +426,13 @@ export default function Welcome({
                                                 </Link>
                                                 <hr className="my-1 border-[#def0e2]" />
                                                 <Link
+                                                    href={route('customer.orders')}
+                                                    className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
+                                                >
+                                                    <Package size={16} /> My orders
+                                                </Link>
+                                                <hr className="my-1 border-[#def0e2]" />
+                                                <Link
                                                     href={route('customer.vouchers')}
                                                     className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
                                                     aria-label={`Voucher${newVoucherCount > 0 ? `, ${newVoucherCount} new` : ''}`}
@@ -454,9 +475,9 @@ export default function Welcome({
                         </div>
                     </div>
                 </header>
-                <main className="mx-auto flex max-w-310 flex-col px-5 pb-24 sm:px-8 lg:pb-12">
+                <main className="mx-auto flex max-w-310 flex-col px-5 pb-24 sm:px-8 md:pb-12">
                     <nav
-                        className="order-2 mt-3 flex scrollbar-none gap-3 overflow-x-auto rounded-2xl border border-[#e3eee6] bg-white px-4 py-3 shadow-[0_4px_16px_rgba(38,104,63,0.04)] [&::-webkit-scrollbar]:hidden"
+                        className="order-2 mx-[-1.25rem] mt-0 flex scrollbar-none gap-3 overflow-x-auto rounded-none border-0 bg-white px-4 py-3 shadow-[0_4px_16px_rgba(38,104,63,0.04)] [&::-webkit-scrollbar]:hidden sm:mx-[-2rem] lg:mx-0 lg:mt-3 lg:rounded-2xl lg:border lg:border-[#e3eee6]"
                         aria-label="Product categories"
                     >
                         <button
@@ -499,7 +520,7 @@ export default function Welcome({
                             );
                         })}
                     </nav>
-                    <section className="relative order-1 mt-3 min-h-60 overflow-hidden rounded-2xl border border-[#e1ebdf] bg-[#eef6e8] px-4 py-6 shadow-[0_8px_25px_rgba(22,59,36,0.06)] sm:px-8 sm:py-8 md:px-11 md:py-9">
+                    <section className="relative order-1 mx-[-1.25rem] mt-0 min-h-60 overflow-hidden rounded-none border border-[#e1ebdf] bg-[#eef6e8] px-4 py-6 shadow-[0_8px_25px_rgba(22,59,36,0.06)] sm:mx-[-2rem] sm:px-8 sm:py-8 md:px-11 md:py-9 lg:mx-0 lg:mt-3 lg:rounded-2xl">
                         {heroMediaType === 'video' && heroMediaPath && (
                             <video src={heroMediaPath} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover" />
                         )}
@@ -532,7 +553,10 @@ export default function Welcome({
                             </div>
                         </div>
                     </section>
-                    <section id="products" className="order-3 mt-5 rounded-2xl border border-[#e3eee6] bg-white p-4 sm:p-5">
+                    <section
+                        id="products"
+                        className="order-3 mx-[-1.25rem] mt-0 rounded-none border-0 bg-white p-4 sm:mx-[-2rem] sm:p-5 lg:mx-0 lg:mt-5 lg:rounded-2xl lg:border lg:border-[#e3eee6]"
+                    >
                         <div className="mb-4 flex items-end justify-between gap-4">
                             <div>
                                 <h2 className="font-display text-xl font-bold text-[#184c35]">
@@ -545,7 +569,7 @@ export default function Welcome({
                             </div>
                         </div>
                         {productFeed.length > 0 ? (
-                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5">
+                            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-4 xl:grid-cols-5">
                                 {productFeed.map((product) => {
                                     const price = product.sale_price ?? product.base_price;
                                     const image = product.images?.[0]?.path;
@@ -568,6 +592,8 @@ export default function Welcome({
                                                     <img
                                                         src={image.startsWith('http') || image.startsWith('/') ? image : `/storage/${image}`}
                                                         alt={product.name}
+                                                        loading="lazy"
+                                                        decoding="async"
                                                         className="block h-full w-full object-cover"
                                                     />
                                                 ) : (
@@ -642,7 +668,7 @@ export default function Welcome({
                                     <p className="mt-1 text-sm text-[#647568]">More picks from the same category.</p>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4">
+                            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-5 lg:grid-cols-4">
                                 {recommendations.map((product) => {
                                     const price = product.sale_price ?? product.base_price;
                                     const image = product.images?.[0]?.path;
@@ -665,6 +691,8 @@ export default function Welcome({
                                                     <img
                                                         src={image.startsWith('http') || image.startsWith('/') ? image : `/storage/${image}`}
                                                         alt={product.name}
+                                                        loading="lazy"
+                                                        decoding="async"
                                                         className="block h-full w-full object-cover"
                                                     />
                                                 ) : (
@@ -730,7 +758,7 @@ export default function Welcome({
                             </div>
                         </section>
                     )}
-                    <footer className="order-10 mt-8 border-t border-[#e0ebe2] bg-white px-5 py-7 text-xs text-[#61786b] sm:px-7">
+                    <footer className="order-10 mx-[-1.25rem] mt-0 border-t border-[#e0ebe2] bg-white px-5 py-7 text-xs text-[#61786b] sm:mx-[-2rem] sm:px-7 lg:mx-0 lg:mt-8">
                         <div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_1fr_1fr_1.2fr]">
                             <div>
                                 <div className="flex items-center gap-2 text-base font-bold text-[#145c3d]">
