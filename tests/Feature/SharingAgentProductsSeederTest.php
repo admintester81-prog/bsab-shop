@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Category;
 use App\Models\Shop;
 use App\Models\User;
 use Database\Seeders\SharingAgentProductsSeeder;
@@ -30,6 +31,22 @@ class SharingAgentProductsSeederTest extends TestCase
             'seller_id' => $shop->id,
         ]);
         $this->assertSame(20, $shop->products()->count());
+
+        $agriculture = Category::query()->where('slug', 'agriculture')->firstOrFail();
+        $this->assertSame(10, $agriculture->children()->count());
+        $this->assertSame(
+            'Seeds & Seedlings',
+            Category::query()->where('slug', 'seeds-seedlings')->value('name'),
+        );
+        $this->assertDatabaseHas('products', [
+            'shop_id' => $shop->id,
+            'name' => 'Hybrid Tomato Seeds',
+            'category_id' => Category::query()->where('slug', 'seeds-seedlings')->value('id'),
+        ]);
+        $this->assertSame(
+            0,
+            $shop->products()->whereHas('category', fn ($query) => $query->whereNull('parent_id'))->count(),
+        );
 
         $shop->products()->with(['images', 'variants.optionValues'])->get()->each(function ($product): void {
             $this->assertCount(5, $product->images);

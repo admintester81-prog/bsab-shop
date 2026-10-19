@@ -16,10 +16,10 @@ class SharingAgentProductsSeeder extends Seeder
     public function run(): void
     {
         $seller = User::updateOrCreate(
-            ['email' => 'sharingagent@example.com'],
+            ['email' => 'seller1@gmail.com'],
             [
                 'name' => 'SharingAgent',
-                'password' => 'SharingAgent123!',
+                'password' => 'Seller1@gmail.com',
                 'email_verified_at' => now(),
                 'role' => 'seller',
                 'status' => 'active',
@@ -34,98 +34,160 @@ class SharingAgentProductsSeeder extends Seeder
             [
                 'name' => 'SharingAgent',
                 'slug' => 'sharingagent',
-                'description' => 'Sample marketplace shop for the SharingAgent demo catalog.',
+                'description' => 'Sample marketplace shop for the SharingAgent farm and agriculture catalog.',
                 'status' => 'approved',
                 'commission_rate' => 10,
             ],
         );
 
-        $categories = [
-            'Electronics',
-            'Fashion',
-            'Home',
-            'Health',
-            'Beauty',
-            'Sports',
-            'Books',
-            'Groceries',
-            'Office',
-            'Toys',
+        $agriculture = Category::updateOrCreate(
+            ['slug' => 'agriculture'],
+            ['name' => 'Agriculture', 'slug' => 'agriculture', 'parent_id' => null],
+        );
+
+        $catalog = [
+            [
+                'category' => 'Seeds & Seedlings',
+                'option' => 'Pack Size',
+                'variants' => ['Small (100 seeds)', 'Medium (500 seeds)', 'Bulk (1,000 seeds)'],
+                'products' => [
+                    ['Hybrid Tomato Seeds', 'High-germination tomato seeds selected for productive home and commercial gardens.'],
+                    ['Sweet Corn Seeds', 'Sweet corn seed for reliable field planting and a flavorful harvest.'],
+                ],
+            ],
+            [
+                'category' => 'Fertilizers & Soil',
+                'option' => 'Bag Size',
+                'variants' => ['5 kg', '10 kg', '25 kg'],
+                'products' => [
+                    ['Organic Compost', 'Nutrient-rich compost to improve soil structure and support healthy crop growth.'],
+                    ['Complete NPK Fertilizer', 'Balanced granular fertilizer for vegetables, fruit crops, and field plants.'],
+                ],
+            ],
+            [
+                'category' => 'Crop Protection',
+                'option' => 'Bottle Size',
+                'variants' => ['250 mL', '500 mL', '1 L'],
+                'products' => [
+                    ['Neem Oil Concentrate', 'Plant-derived neem oil concentrate for routine garden and crop care.'],
+                    ['Organic Pest Control Spray', 'Ready-to-use botanical spray for common garden pest management.'],
+                ],
+            ],
+            [
+                'category' => 'Farm Tools & Equipment',
+                'option' => 'Tool Size',
+                'variants' => ['Compact', 'Standard', 'Heavy Duty'],
+                'products' => [
+                    ['Stainless Pruning Shears', 'Sharp, comfortable pruning shears for trimming plants and harvesting stems.'],
+                    ['Heavy-Duty Garden Hoe', 'Durable steel hoe for weeding, soil preparation, and furrow making.'],
+                ],
+            ],
+            [
+                'category' => 'Irrigation & Watering',
+                'option' => 'Coverage',
+                'variants' => ['Small Plot', 'Medium Plot', 'Large Plot'],
+                'products' => [
+                    ['Drip Irrigation Kit', 'Water-saving drip lines and fittings for precise watering of crop rows.'],
+                    ['Adjustable Sprinkler Set', 'Adjustable sprinklers for even watering across garden beds and small fields.'],
+                ],
+            ],
+            [
+                'category' => 'Animal Feed & Nutrition',
+                'option' => 'Bag Size',
+                'variants' => ['5 kg', '10 kg', '25 kg'],
+                'products' => [
+                    ['Layer Poultry Feed', 'Balanced daily feed formulated to support healthy laying hens.'],
+                    ['Cattle Feed Pellets', 'Nutritious feed pellets for supplementing cattle diets.'],
+                ],
+            ],
+            [
+                'category' => 'Livestock Care',
+                'option' => 'Pack Size',
+                'variants' => ['Small Pack', 'Farm Pack', 'Bulk Pack'],
+                'products' => [
+                    ['Poultry Vitamin Supplement', 'Water-soluble vitamin supplement for everyday poultry care.'],
+                    ['Livestock Mineral Block', 'Convenient mineral lick for cattle, goats, and other farm animals.'],
+                ],
+            ],
+            [
+                'category' => 'Harvest & Storage',
+                'option' => 'Capacity',
+                'variants' => ['10 kg', '20 kg', '30 kg'],
+                'products' => [
+                    ['Reusable Produce Harvest Crate', 'Ventilated reusable crate for collecting and transporting fresh produce.'],
+                    ['Woven Grain Storage Sack', 'Durable woven sack for handling and storing harvested grains.'],
+                ],
+            ],
+            [
+                'category' => 'Greenhouse & Growing Supplies',
+                'option' => 'Tray Size',
+                'variants' => ['50 Cells', 'Tray of 72', 'Tray of 128'],
+                'products' => [
+                    ['Reusable Seedling Tray', 'Reusable propagation tray for starting vegetables and flowers.'],
+                    ['UV-Resistant Shade Netting', 'Weather-resistant shade netting to help protect crops from intense sunlight.'],
+                ],
+            ],
+            [
+                'category' => 'Farm Safety & Workwear',
+                'option' => 'Size',
+                'variants' => ['Small', 'Medium', 'Large'],
+                'products' => [
+                    ['Nitrile-Coated Farm Gloves', 'Grip-enhanced work gloves for planting, pruning, and general farm tasks.'],
+                    ['Waterproof Farm Boots', 'Waterproof boots for working in wet fields, gardens, and farmyards.'],
+                ],
+            ],
         ];
-
-        $categoryIds = [];
-
-        foreach ($categories as $categoryName) {
-            $slug = Str::slug($categoryName);
-            $category = Category::updateOrCreate(
-                ['slug' => $slug],
-                ['name' => $categoryName, 'slug' => $slug],
-            );
-
-            $categoryIds[] = $category->id;
-        }
 
         $images = [
-            'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1512436991641-6745cdb1723f?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1491553895911-0055eca6402d?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1511497584788-876760111969?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1512353087810-25dfcd100962?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1526045478516-99145907023c?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1546868871-7041f2a55e12?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1511556820780-d912e42b4980?auto=format&fit=crop&w=900&q=80',
-            'https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1495107334309-fcf20504a5ab?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1500937386664-56d1dfef3854?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1500595046743-cd271d694d30?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1495107334309-fcf20504a5ab?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1466692476868-aef1dfb1e735?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1500595046743-cd271d694d30?auto=format&fit=crop&w=900&q=80',
+            'https://images.unsplash.com/photo-1523348837708-15d4a09cfac2?auto=format&fit=crop&w=900&q=80',
         ];
 
-        $variantOptions = [
-            'Electronics' => ['Color', ['Matte Black', 'Silver', 'Midnight Blue']],
-            'Fashion' => ['Size', ['Small', 'Medium', 'Large']],
-            'Home' => ['Finish', ['Natural Oak', 'Classic White', 'Walnut']],
-            'Health' => ['Pack Size', ['30 Count', '60 Count', '90 Count']],
-            'Beauty' => ['Shade', ['Light', 'Medium', 'Deep']],
-            'Sports' => ['Size', ['Small', 'Medium', 'Large']],
-            'Books' => ['Edition', ['Paperback', 'Hardcover', 'Collector Edition']],
-            'Groceries' => ['Pack Size', ['250 g', '500 g', '1 kg']],
-            'Office' => ['Format', ['A4', 'A5', 'Letter']],
-            'Toys' => ['Color', ['Red', 'Blue', 'Yellow']],
-        ];
+        $productIndex = 0;
 
-        $index = 0;
+        foreach ($catalog as $categoryIndex => $categoryData) {
+            $categorySlug = Str::slug($categoryData['category']);
+            $category = Category::updateOrCreate(
+                ['slug' => $categorySlug],
+                [
+                    'name' => $categoryData['category'],
+                    'slug' => $categorySlug,
+                    'parent_id' => $agriculture->id,
+                ],
+            );
 
-        foreach ($categoryIds as $categoryIndex => $categoryId) {
-            for ($productNumber = 1; $productNumber <= 2; $productNumber++) {
-                $productName = $categories[$categoryIndex].' '.($productNumber === 1 ? 'Essential' : 'Pro');
-                $slug = Str::slug($productName.'-'.$categoryId.'-'.$productNumber);
+            foreach ($categoryData['products'] as $productIndexInCategory => [$productName, $description]) {
+                $sku = 'SA-'.str_pad((string) ($categoryIndex + 1), 2, '0', STR_PAD_LEFT)
+                    .'-'.str_pad((string) ($productIndexInCategory + 1), 2, '0', STR_PAD_LEFT);
+                $slug = Str::slug($productName.'-'.$categorySlug);
+                $basePrice = 199 + ($categoryIndex * 33) + (($productIndexInCategory + 1) * 29);
+                $salePrice = 169 + ($categoryIndex * 29) + (($productIndexInCategory + 1) * 21);
 
                 $product = Product::updateOrCreate(
-                    ['slug' => $slug],
+                    ['sku' => $sku],
                     [
                         'shop_id' => $shop->id,
                         'seller_id' => $shop->id,
-                        'category_id' => $categoryId,
+                        'category_id' => $category->id,
                         'name' => $productName,
                         'slug' => $slug,
-                        'description' => 'A high-quality product from SharingAgent, ready for customers to discover and purchase.',
+                        'description' => $description,
                         'condition' => 'new',
                         'authenticity_status' => 'verified',
                         'verification_status' => 'verified',
-                        'base_price' => 199 + ($categoryIndex * 33) + ($productNumber * 29),
+                        'base_price' => $basePrice,
                         'currency' => 'PHP',
-                        'sale_price' => 169 + ($categoryIndex * 29) + ($productNumber * 21),
-                        'sku' => 'SA-'.str_pad((string) ($categoryIndex + 1), 2, '0', STR_PAD_LEFT).'-'.str_pad((string) $productNumber, 2, '0', STR_PAD_LEFT),
+                        'sale_price' => $salePrice,
                         'brand' => 'SharingAgent',
-                        'stock_quantity' => 25 + ($productNumber * 10),
+                        'stock_quantity' => 25 + (($productIndexInCategory + 1) * 10),
                         'status' => 'published',
                         'is_approved' => true,
                         'is_active' => true,
@@ -137,7 +199,7 @@ class SharingAgentProductsSeeder extends Seeder
                     ProductImage::updateOrCreate(
                         ['product_id' => $product->id, 'sort_order' => $imageIndex + 1],
                         [
-                            'path' => $images[($index * 5 + $imageIndex) % count($images)],
+                            'path' => $images[($productIndex * 5 + $imageIndex) % count($images)],
                             'is_primary' => $imageIndex === 0,
                         ],
                     );
@@ -145,13 +207,13 @@ class SharingAgentProductsSeeder extends Seeder
 
                 $product->images()->whereNotIn('sort_order', range(1, 5))->delete();
 
-                [$optionName, $variantNames] = $variantOptions[$categories[$categoryIndex]];
                 $option = $product->options()->updateOrCreate(
-                    ['name' => $optionName],
+                    ['name' => $categoryData['option']],
                     ['sort_order' => 1],
                 );
+                $product->options()->where('id', '!=', $option->id)->delete();
 
-                foreach ($variantNames as $variantIndex => $variantName) {
+                foreach ($categoryData['variants'] as $variantIndex => $variantName) {
                     $optionValue = $option->values()->updateOrCreate(
                         ['value' => $variantName],
                         ['sort_order' => $variantIndex + 1],
@@ -160,18 +222,18 @@ class SharingAgentProductsSeeder extends Seeder
                         ['sku' => $product->sku.'-V'.($variantIndex + 1)],
                         [
                             'name' => $variantName,
-                            'price' => (float) ($product->sale_price ?? $product->base_price) + ($variantIndex * 25),
+                            'price' => (float) $salePrice + ($variantIndex * 25),
                             'stock_quantity' => 10 + ($variantIndex * 5),
                             'is_active' => true,
                         ],
                     );
-                    $variant->optionValues()->updateOrCreate(
-                        ['product_option_value_id' => $optionValue->id],
-                        [],
-                    );
+                    $variant->optionValues()->delete();
+                    $variant->optionValues()->create([
+                        'product_option_value_id' => $optionValue->id,
+                    ]);
                 }
 
-                $index++;
+                $productIndex++;
             }
         }
     }
