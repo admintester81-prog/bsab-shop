@@ -36,16 +36,9 @@ return [
 
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
-        'model' => env('GEMINI_MODEL', 'gemini-2.5-flash'),
+        'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
         'fallback_model' => env('GEMINI_FALLBACK_MODEL', 'gemini-2.0-flash'),
-    ],
-
-    'ollama' => [
-        'base_url' => env('OLLAMA_BASE_URL', env('OLLAMA_URL', 'http://127.0.0.1:11434')),
-        'url' => env('OLLAMA_BASE_URL', env('OLLAMA_URL', 'http://127.0.0.1:11434')),
-        'model' => env('OLLAMA_MODEL', 'llama3.2:1b'),
-        'vision_model' => env('OLLAMA_VISION_MODEL', 'moondream:1.8b'),
-        'timeout' => (int) env('OLLAMA_TIMEOUT', 300),
+        'timeout' => (int) env('GEMINI_TIMEOUT', 60),
     ],
 
     'slack' => [

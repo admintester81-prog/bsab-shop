@@ -1,6 +1,7 @@
 import { PortalLayout } from '@/components/portal-layout';
-import { prepareSanctum } from '@/lib/api';
+import { getApiErrorMessage, prepareSanctum } from '@/lib/api';
 import { Head, useForm } from '@inertiajs/react';
+import axios from 'axios';
 import {
     AlertTriangle,
     ArrowLeft,
@@ -15,16 +16,18 @@ import {
     ImagePlus,
     Layers3,
     LineChart,
+    LoaderCircle,
     Package,
     Pencil,
     Plus,
     Search,
+    Sparkles,
     ShoppingBag,
     Trash2,
     TrendingUp,
     TriangleAlert,
 } from 'lucide-react';
-import { FormEventHandler, Fragment, useMemo, useState } from 'react';
+import { FormEventHandler, Fragment, useMemo, useRef, useState } from 'react';
 import {
     Area,
     AreaChart,
@@ -384,6 +387,10 @@ export default function SellerProducts({ products, categories, monitoring }: { p
     const [pendingDelete, setPendingDelete] = useState<Product | null>(null);
     const [imageProcessing, setImageProcessing] = useState(false);
     const [imageError, setImageError] = useState('');
+    const [descriptionGenerating, setDescriptionGenerating] = useState(false);
+    const [descriptionError, setDescriptionError] = useState('');
+    const [descriptionGenerated, setDescriptionGenerated] = useState(false);
+    const descriptionRequestId = useRef(0);
     const [cropQueue, setCropQueue] = useState<File[]>([]);
     const [cropImage, setCropImage] = useState<CropImage | null>(null);
     const [existingImages, setExistingImages] = useState<{ path: string; is_primary: boolean }[]>([]);
@@ -469,8 +476,12 @@ export default function SellerProducts({ products, categories, monitoring }: { p
     const openModal = (product?: Product) => {
         const isEditing = Boolean(product);
 
+        descriptionRequestId.current += 1;
         setEditing(product ?? null);
         setOpen(true);
+        setDescriptionGenerating(false);
+        setDescriptionError('');
+        setDescriptionGenerated(false);
         setExistingImages(product?.images ?? []);
         setExistingVideo(product?.short_video_path ?? '');
 
@@ -528,10 +539,14 @@ export default function SellerProducts({ products, categories, monitoring }: { p
         setVariantLocked(false);
     };
     const closeModal = () => {
+        descriptionRequestId.current += 1;
         setOpen(false);
         setEditing(null);
         setImageProcessing(false);
         setImageError('');
+        setDescriptionGenerating(false);
+        setDescriptionError('');
+        setDescriptionGenerated(false);
         setExistingImages([]);
         setExistingVideo('');
         setVariantGroups([createVariantGroup()]);
@@ -621,9 +636,49 @@ export default function SellerProducts({ products, categories, monitoring }: { p
         form.setData('images', [...form.data.images, ...allowed]);
         form.setData('image', allowed[0]);
         setImageError('');
+        setDescriptionError('');
+        setDescriptionGenerated(false);
     };
     const previewVideo = (file: File | null) => {
         form.setData('product_video', file);
+    };
+    const generateProductDescription = async () => {
+        if (form.data.images.length === 0 || descriptionGenerating) return;
+
+        const requestId = ++descriptionRequestId.current;
+        setDescriptionGenerating(true);
+        setDescriptionError('');
+        setDescriptionGenerated(false);
+
+        try {
+            const payload = new FormData();
+            form.data.images.forEach((image, index) => payload.append(`images[${index}]`, image));
+            const { data } = await axios.post<{
+                success: boolean;
+                data?: { description?: string | null };
+                message?: string;
+            }>(route('seller.products.ai-analyze'), payload, {
+                headers: { Accept: 'application/json' },
+            });
+            if (requestId !== descriptionRequestId.current) return;
+
+            const description = data.data?.description?.trim();
+
+            if (!data.success || !description) {
+                throw new Error(data.message || 'The AI could not create a description from these images. Try another image or write the description manually.');
+            }
+
+            form.setData('description', description);
+            setDescriptionGenerated(true);
+        } catch (error: unknown) {
+            if (requestId === descriptionRequestId.current) {
+                setDescriptionError(getApiErrorMessage(error, 'Unable to generate a product description. Please try again or enter it manually.'));
+            }
+        } finally {
+            if (requestId === descriptionRequestId.current) {
+                setDescriptionGenerating(false);
+            }
+        }
     };
     const buildVariantOptionSpec = (groups: VariantGroup[]) =>
         groups
@@ -1352,6 +1407,8 @@ export default function SellerProducts({ products, categories, monitoring }: { p
                                                                 const next = form.data.images.filter((_, itemIndex) => itemIndex !== index);
                                                                 form.setData('images', next);
                                                                 form.setData('image', next[0] ?? null);
+                                                                setDescriptionError('');
+                                                                setDescriptionGenerated(false);
                                                             }}
                                                             className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#171717] text-[10px] text-white"
                                                         >
@@ -1359,6 +1416,28 @@ export default function SellerProducts({ products, categories, monitoring }: { p
                                                         </button>
                                                     </div>
                                                 ))}
+                                            </div>
+                                        )}
+                                        {!editing && (
+                                            <div className="mt-4">
+                                                <button
+                                                    type="button"
+                                                    onClick={generateProductDescription}
+                                                    disabled={form.data.images.length === 0 || descriptionGenerating}
+                                                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-[#b8d9c2] bg-[#f3faf5] px-4 text-sm font-semibold text-[#187143] transition hover:bg-[#e9f5ec] disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    {descriptionGenerating ? <LoaderCircle size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                                                    {descriptionGenerating ? 'Generating description…' : 'Generate description with AI'}
+                                                </button>
+                                                <p className="mt-2 text-xs text-[#66756f]">
+                                                    AI will use your uploaded product images to draft a description for you to review.
+                                                </p>
+                                                {descriptionError && <p role="alert" className="mt-2 text-sm text-[#a13b32]">{descriptionError}</p>}
+                                                {descriptionGenerated && (
+                                                    <p role="status" className="mt-2 text-sm text-[#187143]">
+                                                        Description generated. Review or edit it before saving.
+                                                    </p>
+                                                )}
                                             </div>
                                         )}
                                     </div>

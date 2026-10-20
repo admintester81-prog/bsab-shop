@@ -29,8 +29,6 @@ class SupportConversationController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        set_time_limit(300);
-
         $validated = $request->validate([
             'body' => ['required', 'string', 'max:2000'],
         ]);
@@ -109,8 +107,6 @@ class SupportConversationController extends Controller
 
     public function guestAssistant(Request $request, SupportAssistantService $assistant): JsonResponse
     {
-        set_time_limit(300);
-
         $validated = $request->validate([
             'body' => ['required', 'string', 'max:2000'],
             'history' => ['sometimes', 'array', 'max:6'],

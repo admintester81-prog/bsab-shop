@@ -4,12 +4,14 @@ namespace App\Services;
 
 use App\Models\Category;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class AIProductService
 {
+    public function __construct(
+        private readonly GeminiService $gemini,
+    ) {}
+
     public function analyze(UploadedFile|array $images): array
     {
         $normalizedImages = is_array($images) ? $images : [$images];
@@ -27,86 +29,26 @@ class AIProductService
             }
         }
 
-        $baseUrl = rtrim((string) config('services.ollama.base_url', config('services.ollama.url', 'http://127.0.0.1:11434')), '/');
-        $visionModel = trim((string) config('services.ollama.vision_model', 'moondream:1.8b'));
-        $timeout = (int) config('services.ollama.timeout', 120);
+        $parts = [['text' => $this->buildPrompt()]];
 
-        if ($visionModel === '') {
-            throw new \RuntimeException('Ollama vision model is not configured. Set OLLAMA_VISION_MODEL in your environment.');
+        foreach ($normalizedImages as $image) {
+            $parts[] = [
+                'inline_data' => [
+                    'mime_type' => $image->getMimeType(),
+                    'data' => base64_encode($image->getContent()),
+                ],
+            ];
         }
 
-        return $this->requestOllamaAnalysis($normalizedImages, $baseUrl, $visionModel, $timeout);
-    }
-
-    private function requestOllamaAnalysis(array $images, string $baseUrl, string $model, int $timeout): array
-    {
-        $phpExecutionLimit = (int) ini_get('max_execution_time');
-
-        if ($phpExecutionLimit !== 0 && $phpExecutionLimit <= $timeout) {
-            set_time_limit($timeout + 10);
-        }
-
-        $payload = [
-            'model' => $model,
-            'stream' => false,
-            'keep_alive' => '10m',
-            'options' => [
-                'num_ctx' => 2048,
-                'num_predict' => 512,
+        $text = $this->gemini->generateText(
+            [['parts' => $parts]],
+            [
+                'responseMimeType' => 'application/json',
+                'temperature' => 0.2,
             ],
-            'messages' => [[
-                'role' => 'user',
-                'content' => $this->buildPrompt(),
-                'images' => array_map(fn (UploadedFile $image) => base64_encode($image->getContent()), $images),
-            ]],
-        ];
-
-        $response = Http::acceptJson()
-            ->timeout($timeout)
-            ->connectTimeout(10)
-            ->post($baseUrl.'/api/chat', $payload);
-
-        if (! $response->successful()) {
-            $status = $response->status();
-            $message = $this->mapOllamaError($status, $response->body());
-
-            Log::error('Ollama AI Error', [
-                'model' => $model,
-                'status' => $status,
-                'message' => $message,
-                'response_body' => $response->body(),
-            ]);
-
-            throw new \RuntimeException($message);
-        }
-
-        $payload = $response->json();
-        $text = $this->extractOllamaResponseText($payload);
+        );
 
         return $this->normalizeAnalysis($this->parseJson($text));
-    }
-
-    private function mapOllamaError(int $status, string $responseBody): string
-    {
-        $normalizedBody = strtolower($responseBody);
-
-        if ($status === 404 || str_contains($normalizedBody, 'model') && str_contains($normalizedBody, 'not found')) {
-            return 'Ollama could not find the configured vision model. Pull the model locally or update OLLAMA_VISION_MODEL.';
-        }
-
-        if ($status === 0 || str_contains($normalizedBody, 'connection refused') || str_contains($normalizedBody, 'failed to connect')) {
-            return 'Ollama is unavailable. Please start the local Ollama service and confirm OLLAMA_BASE_URL is correct.';
-        }
-
-        if ($status >= 500) {
-            return 'Ollama is temporarily unavailable. Please try again in a moment.';
-        }
-
-        if (str_contains($normalizedBody, 'invalid image') || str_contains($normalizedBody, 'unsupported')) {
-            return 'The uploaded product image could not be processed by the selected Ollama vision model. Please try a different JPG, PNG, or WebP image.';
-        }
-
-        return 'Unable to analyze this image with Ollama right now. Please try again or enter the product information manually.';
     }
 
     private function buildPrompt(): string
@@ -146,17 +88,6 @@ Rules:
 PROMPT;
     }
 
-    private function extractOllamaResponseText(array $payload): string
-    {
-        $content = data_get($payload, 'message.content');
-
-        if (is_string($content) && trim($content) !== '') {
-            return $content;
-        }
-
-        throw new \RuntimeException('Ollama returned an invalid response.');
-    }
-
     private function parseJson(string $text): array
     {
         $json = trim($text);
@@ -168,7 +99,7 @@ PROMPT;
         $decoded = json_decode($json, true);
 
         if (! is_array($decoded)) {
-            throw new \RuntimeException('Ollama returned a malformed JSON response.');
+            throw new \RuntimeException('Gemini returned a malformed JSON response.');
         }
 
         return $decoded;

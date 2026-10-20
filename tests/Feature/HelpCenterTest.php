@@ -12,6 +12,18 @@ class HelpCenterTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config([
+            'services.gemini.api_key' => 'test-gemini-key',
+            'services.gemini.model' => 'gemini-3.6-flash',
+        ]);
+    }
+
     public function test_help_center_uses_its_dedicated_page_and_existing_contact_information(): void
     {
         $this->get('/pages/help-center')
@@ -32,8 +44,10 @@ class HelpCenterTest extends TestCase
     {
         $customer = User::factory()->create();
         Http::fake([
-            'http://127.0.0.1:11434/api/chat' => Http::response([
-                'message' => ['content' => 'Open Orders to check your order status.'],
+            self::GEMINI_URL => Http::response([
+                'candidates' => [[
+                    'content' => ['parts' => [['text' => 'Open Orders to check your order status.']]],
+                ]],
             ]),
         ]);
 
@@ -77,8 +91,13 @@ class HelpCenterTest extends TestCase
     public function test_guest_can_get_an_ai_answer_without_creating_a_persisted_conversation(): void
     {
         Http::fake([
-            'http://127.0.0.1:11434/api/chat' => Http::response([
-                'message' => ['content' => 'Open Orders to check your order status.'],
+            self::GEMINI_URL => Http::response([
+                'candidates' => [[
+                    'content' => ['parts' => [
+                        ['text' => 'tone/style: Helpful', 'thought' => true],
+                        ['text' => 'Sign in, open Orders, and select your order to see its latest status.'],
+                    ]],
+                ]],
             ]),
         ]);
 
@@ -90,36 +109,29 @@ class HelpCenterTest extends TestCase
             ],
         ])
             ->assertOk()
-            ->assertJsonPath('reply', 'Open Orders to check your order status.')
+            ->assertJsonPath('reply', 'Sign in, open Orders, and select your order to see its latest status.')
             ->assertJsonPath('assistant_available', true);
 
         $this->assertDatabaseCount('support_conversations', 0);
-        Http::assertSent(fn ($request) => $request['model'] === 'llama3.2:1b'
-            && $request['stream'] === false
-            && $request['options']['num_predict'] === 96
-            && count($request['messages']) === 4);
+        Http::assertSent(fn ($request) => $request->hasHeader('x-goog-api-key', 'test-gemini-key')
+            && count($request['contents']) === 3
+            && $request['contents'][1]['role'] === 'model'
+            && $request['generationConfig']['maxOutputTokens'] === 512
+            && isset($request['systemInstruction']['parts'][0]['text']));
     }
 
-    public function test_assistant_status_reports_whether_the_configured_model_is_installed(): void
+    public function test_assistant_status_reports_whether_gemini_is_configured(): void
     {
-        Http::fake([
-            'http://127.0.0.1:11434/api/tags' => Http::response([
-                'models' => [
-                    ['name' => 'llama3.2:1b'],
-                ],
-            ]),
-        ]);
-
         $this->getJson('/api/support/assistant/status')
             ->assertOk()
             ->assertJsonPath('available', true)
-            ->assertJsonPath('model', 'llama3.2:1b');
+            ->assertJsonPath('model', 'gemini-3.6-flash');
     }
 
-    public function test_guest_receives_an_explicit_offline_response_when_ollama_is_unavailable(): void
+    public function test_guest_receives_an_explicit_offline_response_when_gemini_is_unavailable(): void
     {
         Http::fake([
-            'http://127.0.0.1:11434/api/chat' => Http::response(['error' => 'Model not found'], 404),
+            self::GEMINI_URL => Http::response(['error' => ['message' => 'Gemini service unavailable.']], 503),
         ]);
 
         $this->postJson('/api/support/assistant', ['body' => 'How do I track my order?'])
