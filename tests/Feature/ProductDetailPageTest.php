@@ -19,12 +19,21 @@ class ProductDetailPageTest extends TestCase
     {
         $product = $this->makeProduct();
 
-        $this->get(route('products.show', $product))
+        $this->get(route('products.show', $product->uuid))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('customer/product-detail')
                 ->where('product.id', $product->id)
+                ->where('product.uuid', $product->uuid)
                 ->has('availableVouchers'));
+    }
+
+    public function test_legacy_numeric_product_url_redirects_to_the_uuid_url(): void
+    {
+        $product = $this->makeProduct();
+
+        $this->get('/products/'.$product->id)
+            ->assertRedirect(route('products.show', $product->uuid));
     }
 
     public function test_product_detail_page_renders_when_optional_product_metrics_table_is_missing(): void
@@ -32,7 +41,7 @@ class ProductDetailPageTest extends TestCase
         $product = $this->makeProduct();
         Schema::drop('product_metrics');
 
-        $this->get(route('products.show', $product))
+        $this->get(route('products.show', $product->uuid))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('customer/product-detail')
@@ -45,7 +54,7 @@ class ProductDetailPageTest extends TestCase
         $product = $this->makeProduct();
         Schema::drop('voucher_claims');
 
-        $this->get(route('products.show', $product))
+        $this->get(route('products.show', $product->uuid))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('customer/product-detail')
@@ -70,7 +79,7 @@ class ProductDetailPageTest extends TestCase
                 ->where('products', fn ($products) => $products->pluck('id')->all() === [$approvedProduct->id])
                 ->where('categories.0.products_count', 1));
 
-        $this->get(route('products.show', $unapprovedProduct))
+        $this->get(route('products.show', $unapprovedProduct->uuid))
             ->assertNotFound();
     }
 

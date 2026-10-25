@@ -23,9 +23,13 @@ type CartItem = {
     id: number;
     quantity: number;
     price_snapshot: string;
-    variant?: { name: string } | null;
+    variant?: { name: string; stock_quantity: number; is_active: boolean } | null;
     product?: {
         name: string;
+        color?: string | null;
+        size?: string | null;
+        stock_quantity: number;
+        variants?: { stock_quantity: number; is_active: boolean }[];
         shop?: {
             id: number;
             name: string;
@@ -57,6 +61,7 @@ type CheckoutProps = {
     selectedItemIds?: number[];
     deliveryZones: DeliveryZone[];
     deliveryOptions: Record<DeliveryOption, boolean>;
+    siteSettings?: { brand_name?: string | null; logo_path?: string | null };
 };
 type CheckoutOrder = { id: number; order_number: string };
 
@@ -81,22 +86,28 @@ function formatPrice(value: number) {
     return `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 }
 
+function availableStock(item: CartItem) {
+    if (item.variant) return item.variant.is_active ? item.variant.stock_quantity : 0;
+    const variants = item.product?.variants?.filter((variant) => variant.is_active) ?? [];
+    return variants.length ? variants.reduce((sum, variant) => sum + variant.stock_quantity, 0) : (item.product?.stock_quantity ?? 0);
+}
+
 function ProgressStepper({ step }: { step: CheckoutStep }) {
     const activeIndex = step === 'cart' ? 0 : step === 'shipping' ? 1 : step === 'payment' ? 2 : 3;
 
     return (
-        <div className="mx-auto mt-4 flex w-full max-w-180 items-center justify-between gap-2 overflow-hidden rounded-full border border-[#dfeee5] bg-white/80 px-3 py-2 shadow-[0_8px_30px_rgba(22,59,36,0.04)] sm:px-4">
+        <div className="mx-auto mt-4 flex w-full max-w-180 items-center justify-between gap-2 overflow-hidden rounded-full bg-white/80 px-3 py-2 shadow-[0_8px_30px_rgba(22,59,36,0.04)] sm:px-4">
             {stepLabels.map((label, index) => {
                 const isComplete = index < activeIndex;
                 const isActive = index === activeIndex;
                 const circleClass = isComplete
                     ? 'bg-[#1f7a42] text-white'
                     : isActive
-                      ? 'border-[#1f7a42] bg-[#eaf8ee] text-[#1f7a42]'
-                      : 'border-[#dfeee5] bg-[#f7faf7] text-[#7e8d87]';
+                      ? 'bg-[#1f7a42] text-white'
+                      : 'bg-[#f7faf7] text-[#7e8d87]';
                 return (
                     <div key={label} className="flex min-w-0 flex-1 items-center gap-2">
-                        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold ${circleClass}`}>
+                        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${circleClass}`}>
                             {isComplete ? <Check size={14} /> : index + 1}
                         </div>
                         <span
@@ -128,6 +139,11 @@ function OrderSummary({
     onVoucherCodeChange,
     onApplyVoucher,
     onRemoveVoucher,
+    deliveryZones,
+    selectedArea,
+    deliveryOption,
+    pickupAvailable,
+    onDeliveryAreaChange,
 }: {
     items: CartItem[];
     subtotal: number;
@@ -144,13 +160,20 @@ function OrderSummary({
     onVoucherCodeChange: (value: string) => void;
     onApplyVoucher: () => void;
     onRemoveVoucher: () => void;
+    deliveryZones: DeliveryZone[];
+    selectedArea: string;
+    deliveryOption: DeliveryOption;
+    pickupAvailable: boolean;
+    onDeliveryAreaChange: (value: string) => void;
 }) {
+    const itemCount = items.reduce((count, item) => count + item.quantity, 0);
+
     return (
         <aside className="rounded-[26px] border border-[#dfeee5] bg-[#ebf9ee] p-4 shadow-[0_12px_35px_rgba(22,59,36,0.06)] sm:p-5 lg:sticky lg:top-5">
             <div className="flex items-center justify-between">
                 <h3 className="font-display text-xl font-bold text-[#163b24]">Order summary</h3>
                 <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold tracking-[0.16em] text-[#2c7a3b] uppercase">
-                    {items.length} item{items.length !== 1 ? 's' : ''}
+                    {itemCount} item{itemCount !== 1 ? 's' : ''}
                 </span>
             </div>
 
@@ -190,6 +213,23 @@ function OrderSummary({
                     <span>Local delivery fee</span>
                     <span>{shippingLabel}</span>
                 </div>
+                <label className="block text-xs font-semibold text-[#315843]">
+                    Delivery area
+                    <select
+                        aria-label="Select delivery area"
+                        value={deliveryOption === 'pickup' ? 'pickup' : selectedArea}
+                        onChange={(event) => onDeliveryAreaChange(event.target.value)}
+                        className="mt-1.5 w-full rounded-xl border border-[#dfeee5] bg-white px-3 py-2.5 text-xs text-[#163b24] outline-none focus:border-[#2c9350]"
+                    >
+                        <option value="">Select delivery area</option>
+                        {deliveryZones.filter((zone) => zone.barangay).map((zone) => (
+                            <option key={zone.id} value={String(zone.id)}>
+                                {zone.barangay} — {zone.name} ({zone.is_free_delivery ? 'Free delivery eligible' : formatPrice(Number(zone.delivery_fee))})
+                            </option>
+                        ))}
+                        {pickupAvailable && <option value="pickup">Pickup — no delivery fee</option>}
+                    </select>
+                </label>
                 <div className="rounded-xl border border-[#dfeee5] bg-white p-3">
                     <p className="mb-2 text-xs font-bold text-[#163b24]">Voucher</p>
                     {voucher ? (
@@ -206,7 +246,7 @@ function OrderSummary({
                             <input
                                 value={voucherCode}
                                 onChange={(event) => onVoucherCodeChange(event.target.value.toUpperCase())}
-                                placeholder="Enter code"
+                                placeholder="Enter voucher code"
                                 className="min-w-0 flex-1 rounded-lg border border-[#dfeee5] px-2.5 py-2 text-xs uppercase"
                             />
                             <button
@@ -250,7 +290,13 @@ function OrderSummary({
 }
 
 export default function CustomerCheckout() {
-    const { selectedItemIds: initialSelectedItemIds = [], deliveryZones, deliveryOptions } = usePage<CheckoutProps>().props;
+    const { selectedItemIds: initialSelectedItemIds = [], deliveryZones, deliveryOptions, siteSettings = {} } = usePage<CheckoutProps>().props;
+    const brandName = siteSettings.brand_name || 'BSAB-Shop';
+    const logoPath = siteSettings.logo_path
+        ? siteSettings.logo_path.startsWith('http') || siteSettings.logo_path.startsWith('/')
+            ? siteSettings.logo_path
+            : `/storage/${siteSettings.logo_path}`
+        : null;
     const queryClient = useQueryClient();
     const { data, isLoading } = useQuery<CartData>({
         queryKey: ['cart'],
@@ -282,6 +328,7 @@ export default function CustomerCheckout() {
     const [placedOrder, setPlacedOrder] = useState<CheckoutOrder | null>(null);
 
     const selectedItems = useMemo(() => items.filter((item) => selectedItemIds.includes(item.id)), [items, selectedItemIds]);
+    const selectedItemCount = selectedItems.reduce((count, item) => count + item.quantity, 0);
     const gcashShops = useMemo(
         () =>
             Array.from(
@@ -363,6 +410,7 @@ export default function CustomerCheckout() {
     }, [selectedItems]);
 
     async function submitOrder() {
+        if (busy) return;
         setBusy(true);
         setNotice('');
 
@@ -413,7 +461,7 @@ export default function CustomerCheckout() {
     }
 
     async function changeCheckoutQuantity(item: CartItem, quantity: number) {
-        if (cartItemBusy || quantity < 1) return;
+        if (cartItemBusy || quantity < 1 || quantity > availableStock(item)) return;
         setCartItemBusy(item.id);
         setNotice('');
         try {
@@ -441,12 +489,39 @@ export default function CustomerCheckout() {
         }
     }
 
+    function changeDeliveryArea(value: string) {
+        if (value === 'pickup') {
+            if (!deliveryOptions.pickup) return;
+            setDeliveryOption('pickup');
+            setNotice('');
+            return;
+        }
+
+        const zone = deliveryZones.find((deliveryZone) => String(deliveryZone.id) === value);
+        if (!zone?.barangay) return;
+
+        setAddress((current) => ({ ...current, barangay: zone.barangay || '' }));
+        if (deliveryOption === 'pickup') {
+            const deliveryMethod = (['local_delivery', 'seller_delivery'] as const).find((option) => deliveryOptions[option]);
+            if (deliveryMethod) setDeliveryOption(deliveryMethod);
+        }
+        setNotice('');
+    }
+
     function continueDesktopFlow() {
         setNotice('');
 
         if (desktopStep === 'cart') {
             if (!selectedItems.length) {
                 setNotice('Select at least one product to continue.');
+                return;
+            }
+            if (!deliveryOptions[deliveryOption]) {
+                setNotice('Please choose an available delivery option.');
+                return;
+            }
+            if (deliveryOption !== 'pickup' && !selectedZone) {
+                setNotice('Select a valid delivery area or choose pickup to continue.');
                 return;
             }
             setDesktopStep('shipping');
@@ -535,6 +610,14 @@ export default function CustomerCheckout() {
                 setNotice('Select at least one product to continue.');
                 return;
             }
+            if (!deliveryOptions[deliveryOption]) {
+                setNotice('Please choose an available delivery option.');
+                return;
+            }
+            if (deliveryOption !== 'pickup' && !selectedZone) {
+                setNotice('Select a valid delivery area or choose pickup to continue.');
+                return;
+            }
             setStep('shipping');
             return;
         }
@@ -601,7 +684,7 @@ export default function CustomerCheckout() {
                     <div className="flex items-center justify-between gap-3 border-b border-[#e8f2eb] pb-4">
                         <div>
                             <h2 className={headingClass}>Your Items</h2>
-                            <p className="mt-1 text-sm text-[#718377]">{selectedItems.length} selected item{selectedItems.length === 1 ? '' : 's'}</p>
+                            <p className="mt-1 text-sm text-[#718377]">{selectedItemCount} selected item{selectedItemCount === 1 ? '' : 's'}</p>
                         </div>
                         <ShoppingBag size={22} className="text-[#25864a]" aria-hidden="true" />
                     </div>
@@ -622,7 +705,11 @@ export default function CustomerCheckout() {
                                     <div className="min-w-0 flex-1">
                                         <h3 className="truncate font-bold text-[#183f2a]">{item.product?.name || 'Product'}</h3>
                                         <p className="mt-1 text-sm text-[#718377]">{item.product?.shop?.name || 'Marketplace item'}</p>
-                                        {item.variant?.name && <p className="mt-1 text-xs text-[#718377]">Variant: {item.variant.name}</p>}
+                                        {(item.variant?.name || [item.product?.color, item.product?.size].filter(Boolean).join(' / ')) && (
+                                            <p className="mt-1 text-xs text-[#718377]">
+                                                Variant: {item.variant?.name || [item.product?.color, item.product?.size].filter(Boolean).join(' / ')}
+                                            </p>
+                                        )}
                                         <p className="mt-2 font-bold text-[#1f7a42]">{formatPrice(Number(item.price_snapshot))} <span className="font-normal text-[#718377]">each</span></p>
                                     </div>
                                     <div className="flex shrink-0 items-center gap-3">
@@ -631,7 +718,7 @@ export default function CustomerCheckout() {
                                                 <Minus size={14} />
                                             </button>
                                             <span className="w-8 text-center text-sm font-bold text-[#163b24]">{item.quantity}</span>
-                                            <button type="button" disabled={cartItemBusy === item.id} onClick={() => void changeCheckoutQuantity(item, item.quantity + 1)} className="flex h-8 w-8 items-center justify-center rounded-full text-[#1f7a42] hover:bg-[#edf8f0] disabled:opacity-40" aria-label={`Increase ${item.product?.name || 'product'} quantity`}>
+                                            <button type="button" disabled={cartItemBusy === item.id || item.quantity >= availableStock(item)} onClick={() => void changeCheckoutQuantity(item, item.quantity + 1)} className="flex h-8 w-8 items-center justify-center rounded-full text-[#1f7a42] hover:bg-[#edf8f0] disabled:opacity-40" aria-label={`Increase ${item.product?.name || 'product'} quantity`}>
                                                 <Plus size={14} />
                                             </button>
                                         </div>
@@ -969,7 +1056,7 @@ export default function CustomerCheckout() {
                 <div className="space-y-5">
                     <div className="flex items-center justify-between">
                         <h2 className="font-display text-2xl font-bold text-[#163b24]">
-                            Your Items <span className="text-[#647568]">({selectedItems.length})</span>
+                            Your Items <span className="text-[#647568]">({selectedItemCount})</span>
                         </h2>
                     </div>
 
@@ -981,13 +1068,15 @@ export default function CustomerCheckout() {
                                     ? image.path
                                     : `/storage/${image.path}`
                                 : null;
+                            const variantName = item.variant?.name || [item.product?.color, item.product?.size].filter(Boolean).join(' / ');
+                            const itemBusy = cartItemBusy === item.id;
 
                             return (
                                 <div
                                     key={item.id}
-                                    className="flex flex-wrap items-center gap-3 rounded-3xl border border-[#dfeee5] bg-white p-3 shadow-[0_10px_30px_rgba(22,59,36,0.04)] sm:flex-nowrap sm:p-4"
+                                    className="flex flex-wrap items-center gap-3 rounded-2xl border border-[#dfeee5] bg-white p-3 shadow-[0_8px_22px_rgba(22,59,36,0.04)] sm:flex-nowrap sm:p-4"
                                 >
-                                    <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[#eefaf1] sm:h-28 sm:w-28">
+                                    <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#eefaf1] sm:h-20 sm:w-20">
                                         {imgSrc ? (
                                             <img src={imgSrc} alt={item.product?.name || 'Product'} className="h-full w-full object-cover" />
                                         ) : (
@@ -996,31 +1085,37 @@ export default function CustomerCheckout() {
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <p className="truncate text-base font-bold text-[#163b24]">{item.product?.name || 'Product'}</p>
-                                        <p className="mt-1 text-sm text-[#647568]">White / 9 (US)</p>
+                                        {variantName && <p className="mt-1 truncate text-xs text-[#647568]">{variantName}</p>}
                                         <p className="mt-2 text-base font-bold text-[#163b24]">{formatPrice(Number(item.price_snapshot))}</p>
                                     </div>
                                     <div className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
                                         <div className="flex items-center gap-2 rounded-full border border-[#dfeee5] bg-[#f5fcf7] px-2 py-1.5">
                                             <button
                                                 type="button"
-                                                className="flex h-7 w-7 items-center justify-center rounded-full text-[#1f7a42] hover:bg-white"
-                                                aria-label="Decrease quantity"
+                                                disabled={itemBusy || item.quantity <= 1}
+                                                onClick={() => void changeCheckoutQuantity(item, item.quantity - 1)}
+                                                className="flex h-8 w-8 items-center justify-center rounded-full text-[#1f7a42] hover:bg-white disabled:opacity-40"
+                                                aria-label={`Decrease ${item.product?.name || 'product'} quantity`}
                                             >
                                                 <Minus size={13} />
                                             </button>
                                             <span className="w-4 text-center text-sm font-bold text-[#163b24]">{item.quantity}</span>
                                             <button
                                                 type="button"
-                                                className="flex h-7 w-7 items-center justify-center rounded-full text-[#1f7a42] hover:bg-white"
-                                                aria-label="Increase quantity"
+                                                disabled={itemBusy || item.quantity >= availableStock(item)}
+                                                onClick={() => void changeCheckoutQuantity(item, item.quantity + 1)}
+                                                className="flex h-8 w-8 items-center justify-center rounded-full text-[#1f7a42] hover:bg-white disabled:opacity-40"
+                                                aria-label={`Increase ${item.product?.name || 'product'} quantity`}
                                             >
                                                 <Plus size={13} />
                                             </button>
                                         </div>
                                         <button
                                             type="button"
-                                            aria-label="Remove item"
-                                            className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#f4faf5] text-[#163b24] hover:bg-[#eaf8ee]"
+                                            disabled={itemBusy}
+                                            onClick={() => void removeCheckoutItem(item)}
+                                            aria-label={`Remove ${item.product?.name || 'product'} from cart`}
+                                            className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#f4faf5] text-[#163b24] hover:bg-[#eaf8ee] disabled:opacity-40"
                                         >
                                             <Trash2 size={16} />
                                         </button>
@@ -1377,6 +1472,17 @@ export default function CustomerCheckout() {
         );
     }
 
+    if (step === 'success') {
+        return (
+            <>
+                <Head title="Order placed" />
+                <main className="flex min-h-screen items-center justify-center bg-[#f5fcf7] px-4 py-8 sm:px-6">
+                    {renderCurrentStep()}
+                </main>
+            </>
+        );
+    }
+
     if (!items.length) {
         return (
             <>
@@ -1404,7 +1510,8 @@ export default function CustomerCheckout() {
                 <PortalLayout role="customer" title="Checkout" eyebrow="Select items" hideHeader>
                     <div className="rounded-[30px] border border-[#dfeee5] bg-white p-10 text-center shadow-[0_16px_42px_rgba(22,59,36,0.06)]">
                         <ShoppingBag className="mx-auto text-[#2c9350]" size={42} />
-                        <h2 className="font-display mt-4 text-2xl font-bold text-[#163b24]">Select products from your cart</h2>
+                        <h2 className="font-display mt-4 text-2xl font-bold text-[#163b24]">No items selected</h2>
+                        <p className="mt-2 text-sm text-[#647568]">Return to your cart and select items to check out.</p>
                         <Link
                             href={route('customer.cart')}
                             className="mt-5 inline-flex rounded-full bg-[#1f7a42] px-5 py-3 text-sm font-bold text-white"
@@ -1421,6 +1528,18 @@ export default function CustomerCheckout() {
         <>
             <Head title="Checkout" />
             <PortalLayout role="customer" title="Checkout" eyebrow="Complete your order" hideHeader>
+                <header className="mx-auto flex w-full max-w-7xl items-center justify-center px-4 py-3 sm:px-6 lg:justify-start">
+                    <Link href="/" className="flex items-center gap-2" aria-label={`${brandName} home`}>
+                        {logoPath ? (
+                            <img src={logoPath} alt="" className="h-9 w-9 rounded-full object-cover" />
+                        ) : (
+                            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#eaf8ee] text-[#1f7a42]">
+                                <ShoppingBag size={18} />
+                            </span>
+                        )}
+                        <span className="font-display text-lg font-bold text-[#145c3d]">{brandName}</span>
+                    </Link>
+                </header>
                 <style>{`
                     .checkout-desktop-flow{display:none}
                     @media (min-width:768px){
@@ -1437,7 +1556,7 @@ export default function CustomerCheckout() {
                         .checkout-desktop-progress-step.is-active{color:#163b24}
                         .checkout-desktop-progress-dot{display:flex;width:29px;height:29px;flex:none;align-items:center;justify-content:center;border:1px solid #dcefe4;border-radius:50%;background:#f5faf6;color:#708278;font-size:12px}
                         .checkout-desktop-progress-step.is-complete .checkout-desktop-progress-dot{border-color:#21804a;background:#21804a;color:white}
-                        .checkout-desktop-progress-step.is-active .checkout-desktop-progress-dot{border-color:#21804a;background:#e8f7ed;color:#21804a}
+                        .checkout-desktop-progress-step.is-active .checkout-desktop-progress-dot{border-color:#21804a;background:#21804a;color:#fff}
                         .checkout-desktop-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start}
                         .checkout-desktop-main{min-width:0}
                         .checkout-desktop-actions{display:flex;justify-content:space-between;gap:12px;margin-top:18px}
@@ -1461,12 +1580,12 @@ export default function CustomerCheckout() {
                     }
                 `}</style>
                 <div className="checkout-mobile-flow">
-                <div className="mx-auto w-full min-w-0 max-w-300 px-3 pt-1 pb-6 sm:px-5 lg:px-6 lg:pb-10">
-                    <div className="min-w-0 rounded-[30px] border border-[#dfeee5] bg-[#f3faf5] p-3 shadow-[0_15px_42px_rgba(22,59,36,0.04)] sm:p-4 lg:p-5">
+                <div className="-mx-5 w-[calc(100%+2.5rem)] min-w-0 max-w-none px-0 pt-1 pb-6 sm:-mx-8 sm:w-[calc(100%+4rem)] sm:px-0 lg:pb-10">
+                    <div className="min-w-0 rounded-[30px] bg-[#f3faf5] p-3 shadow-[0_15px_42px_rgba(22,59,36,0.04)] sm:p-4 lg:p-5">
                         <div className="flex items-center gap-3 px-1 pb-2">
                             <Link
                                 href={route('customer.cart')}
-                                className="flex h-10 w-10 items-center justify-center rounded-full border border-[#dfeee5] bg-white text-[#163b24]"
+                                className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#163b24]"
                             >
                                 <ArrowLeft size={18} />
                             </Link>
@@ -1478,7 +1597,7 @@ export default function CustomerCheckout() {
 
                         <ProgressStepper step={step} />
 
-                        {notice && <div className="mt-4 rounded-2xl bg-[#fbeaea] px-4 py-3 text-sm font-semibold text-[#b3413a]">{notice}</div>}
+                        {notice && <div role="alert" className="mt-4 rounded-2xl bg-[#fbeaea] px-4 py-3 text-sm font-semibold text-[#b3413a]">{notice}</div>}
 
                         <div className="mt-5 grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)]">
                             <div className="min-w-0 rounded-[28px] border border-[#dfeee5] bg-[#f9fefb] p-3 sm:p-4 lg:p-5">{renderCurrentStep()}</div>
@@ -1487,7 +1606,7 @@ export default function CustomerCheckout() {
                                 <OrderSummary
                                     items={selectedItems}
                                     subtotal={subtotal}
-                                    shippingLabel={!selectedZone ? 'Select delivery area' : shippingCost === 0 ? 'FREE' : formatPrice(shippingCost)}
+                                    shippingLabel={deliveryOption === 'pickup' ? 'No fee' : !selectedZone ? 'Select delivery area' : shippingCost === 0 ? 'FREE' : formatPrice(shippingCost)}
                                     discount={discount}
                                     total={total}
                                     step={step}
@@ -1500,6 +1619,11 @@ export default function CustomerCheckout() {
                                     onVoucherCodeChange={setVoucherCode}
                                     onApplyVoucher={applyVoucher}
                                     onRemoveVoucher={removeVoucher}
+                                    deliveryZones={deliveryZones}
+                                    selectedArea={selectedZone ? String(selectedZone.id) : ''}
+                                    deliveryOption={deliveryOption}
+                                    pickupAvailable={deliveryOptions.pickup}
+                                    onDeliveryAreaChange={changeDeliveryArea}
                                 />
                             </div>
                         </div>
@@ -1570,7 +1694,7 @@ export default function CustomerCheckout() {
                         <aside className="checkout-desktop-summary" aria-label="Order summary">
                             <div className="flex items-center justify-between gap-3">
                                 <h2 className="text-lg font-extrabold text-[#163b24]">Order Summary</h2>
-                                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#237943]">{selectedItems.length} item{selectedItems.length === 1 ? '' : 's'}</span>
+                                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#237943]">{selectedItemCount} item{selectedItemCount === 1 ? '' : 's'}</span>
                             </div>
                             <div className="mt-4 max-h-60 space-y-3 overflow-y-auto">
                                 {selectedItems.map((item) => (
@@ -1586,6 +1710,23 @@ export default function CustomerCheckout() {
                             <div className="mt-5 space-y-3 border-t border-[#dcefe4] pt-4">
                                 <div className="checkout-desktop-summary-row"><span>Subtotal</span><strong className="text-[#183f2a]">{formatPrice(subtotal)}</strong></div>
                                 <div className="checkout-desktop-summary-row"><span>Shipping</span><strong className="text-[#183f2a]">{deliveryOption === 'pickup' ? 'No fee' : !selectedZone ? 'Calculated after address' : shippingCost === 0 ? 'FREE' : formatPrice(shippingCost)}</strong></div>
+                                <label className="mt-3 block text-xs font-semibold text-[#315843]">
+                                    Delivery area
+                                    <select
+                                        aria-label="Select delivery area"
+                                        value={deliveryOption === 'pickup' ? 'pickup' : selectedZone ? String(selectedZone.id) : ''}
+                                        onChange={(event) => changeDeliveryArea(event.target.value)}
+                                        className="mt-1.5 w-full rounded-xl border border-[#dcefe4] bg-white px-3 py-2.5 text-xs text-[#163b24] outline-none focus:border-[#27874a]"
+                                    >
+                                        <option value="">Select delivery area</option>
+                                        {deliveryZones.filter((zone) => zone.barangay).map((zone) => (
+                                            <option key={zone.id} value={String(zone.id)}>
+                                                {zone.barangay} — {zone.name} ({zone.is_free_delivery ? 'Free delivery eligible' : formatPrice(Number(zone.delivery_fee))})
+                                            </option>
+                                        ))}
+                                        {deliveryOptions.pickup && <option value="pickup">Pickup — no delivery fee</option>}
+                                    </select>
+                                </label>
                                 {discount > 0 && <div className="checkout-desktop-summary-row text-[#237943]"><span>Voucher discount</span><strong>-{formatPrice(discount)}</strong></div>}
                                 <div className="checkout-desktop-summary-row checkout-desktop-summary-total"><span>Total</span><strong>{formatPrice(total)}</strong></div>
                             </div>
@@ -1598,7 +1739,7 @@ export default function CustomerCheckout() {
                                     </div>
                                 ) : (
                                     <div className="flex gap-2">
-                                        <input aria-label="Voucher code" value={voucherCode} onChange={(event) => setVoucherCode(event.target.value.toUpperCase())} placeholder="Enter code" className="min-w-0 flex-1 rounded-lg border border-[#dcefe4] px-2.5 py-2 text-xs uppercase outline-none focus:border-[#27874a]" />
+                                        <input aria-label="Voucher code" value={voucherCode} onChange={(event) => setVoucherCode(event.target.value.toUpperCase())} placeholder="Enter voucher code" className="min-w-0 flex-1 rounded-lg border border-[#dcefe4] px-2.5 py-2 text-xs uppercase outline-none focus:border-[#27874a]" />
                                         <button type="button" disabled={voucherBusy || !voucherCode.trim()} onClick={() => void applyVoucher()} className="rounded-lg bg-[#168348] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{voucherBusy ? '…' : 'Apply'}</button>
                                     </div>
                                 )}

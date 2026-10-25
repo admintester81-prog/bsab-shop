@@ -8,6 +8,7 @@ import '../../../css/design.css';
 
 type Product = {
     id: number;
+    uuid: string;
     name: string;
     base_price: string;
     sale_price?: string;
@@ -142,7 +143,7 @@ export default function CustomerFavorites({ products = [] }: { products?: Produc
                                     product={product}
                                     liked={favoriteIds.includes(product.id)}
                                     onToggleFavorite={() => removeFavorite(product.id)}
-                                    onOpenProduct={() => router.visit(route('products.show', product.id))}
+                                    onOpenProduct={() => router.visit(route('products.show', product.uuid))}
                                     style={
                                         isFading
                                             ? { opacity: 0, transform: 'scale(0.95)', transition: 'opacity 200ms ease, transform 200ms ease' }

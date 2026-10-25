@@ -496,7 +496,7 @@ function OrderDetails({ order, busy, actionError, onClose, onUpdate }: { order: 
                         </div>
                         <label className="flex items-center gap-2 text-[9px] text-[#68766d]">Update order status
                             <select disabled={busy} value={nextStatus} onChange={(event) => setNextStatus(event.target.value as OrderStatus)} className="rounded-lg border border-[#dfe7e1] bg-white px-2 py-2 text-[10px] capitalize">
-                                {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                                {statuses.filter((status) => status !== 'delivered' || order.status === 'delivered').map((status) => <option key={status} value={status}>{status}</option>)}
                             </select>
                         </label>
                         <button type="button" disabled={busy || nextStatus === order.status} onClick={() => onUpdate(nextStatus)} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-[#188747] px-3 text-[10px] font-semibold text-white hover:bg-[#126d39] disabled:cursor-not-allowed disabled:bg-[#e5ece7] disabled:text-[#8b998d]">{busy ? 'Updating…' : 'Update status'}</button>

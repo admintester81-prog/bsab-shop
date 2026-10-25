@@ -64,11 +64,14 @@ export type ProductVariant = {
 
 export type Product = {
     id: number;
+    uuid: string;
     name: string;
     description?: string;
     base_price: string;
     sale_price?: string;
     stock_quantity: number;
+    available_stock?: number;
+    is_out_of_stock?: boolean;
     condition?: string | null;
     brand?: string | null;
     model?: string | null;
@@ -271,20 +274,20 @@ export default function ProductDetail({ product, similarProducts = [], available
         setSelectedImage(images[nextIndex].path);
     }
 
-    async function addToCart() {
+    async function addToCart(quantity = 1): Promise<boolean> {
         if (!auth.user) {
             setMessage('Please log in to add products to your cart.');
-            return;
+            return false;
         }
 
         if (matchingVariant && !matchingVariant.is_active) {
             setMessage('This selected variant is not active.');
-            return;
+            return false;
         }
 
         if (stock < 1) {
             setMessage('This product is out of stock.');
-            return;
+            return false;
         }
 
         setBusy(true);
@@ -294,12 +297,14 @@ export default function ProductDetail({ product, similarProducts = [], available
             await addCartItem({
                 product_id: product.id,
                 variant_id: matchingVariant?.id,
-                quantity: 1,
+                quantity,
             });
 
             setMessage('Added to your cart.');
+            return true;
         } catch (error) {
             setMessage(getApiErrorMessage(error));
+            return false;
         } finally {
             setBusy(false);
         }
@@ -325,13 +330,16 @@ export default function ProductDetail({ product, similarProducts = [], available
         }
     }
 
-    async function useVoucher(voucher: VoucherOffer) {
+    async function applyProductVoucher(voucher: VoucherOffer, quantity = 1) {
         if (!auth.user) {
             router.visit('/login');
             return;
         }
 
-        await addToCart();
+        if (!(await addToCart(quantity))) {
+            return;
+        }
+
         try {
             await prepareSanctum();
             await api.post('/customer/cart/voucher', { code: voucher.code });
@@ -510,25 +518,7 @@ export default function ProductDetail({ product, similarProducts = [], available
                                                         ) : (
                                                             <button
                                                                 type="button"
-                                                                onClick={async () => {
-                                                                    if (!auth.user) {
-                                                                        router.visit('/login');
-                                                                        return;
-                                                                    }
-                                                                    await addToCart();
-                                                                    try {
-                                                                        await prepareSanctum();
-                                                                        await api.post('/customer/cart/voucher', { code: voucher.code });
-                                                                        router.visit('/customer/cart');
-                                                                    } catch (error) {
-                                                                        setMessage(
-                                                                            getApiErrorMessage(
-                                                                                error,
-                                                                                'The voucher could not be applied to this cart.',
-                                                                            ),
-                                                                        );
-                                                                    }
-                                                                }}
+                                                                onClick={() => void applyProductVoucher(voucher)}
                                                                 className="rounded-lg border border-[#9dc7a7] px-3 py-2 text-xs font-bold text-[#1f7a42]"
                                                             >
                                                                 Use Now
@@ -655,7 +645,7 @@ export default function ProductDetail({ product, similarProducts = [], available
                                     return (
                                         <Link
                                             key={item.id}
-                                            href={route('products.show', item.id)}
+                                            href={route('products.show', item.uuid)}
                                             className="group overflow-hidden rounded-2xl border border-[#dfeae1] bg-white/70 p-2 transition hover:-translate-y-0.5 hover:shadow-md"
                                         >
                                             <div className="flex aspect-square items-center justify-center overflow-hidden rounded-xl bg-[#edf5ee]">
@@ -861,7 +851,7 @@ export default function ProductDetail({ product, similarProducts = [], available
                                 return (
                                     <Link
                                         key={item.id}
-                                        href={route('products.show', item.id)}
+                                        href={route('products.show', item.uuid)}
                                         className="overflow-hidden rounded-xl border border-[#dfeae1] bg-white p-1.5"
                                     >
                                         <div className="flex aspect-square items-center justify-center overflow-hidden rounded-[9px] bg-[#edf5ee]">
@@ -916,7 +906,8 @@ export default function ProductDetail({ product, similarProducts = [], available
                 onChangeImage={changeImage}
                 onSelectImage={setSelectedImage}
                 onClaimVoucher={claimVoucher}
-                onUseVoucher={useVoucher}
+                onUseVoucher={applyProductVoucher}
+                actionMessage={message}
                 claimedVoucherIds={claimedVoucherIds}
                 claimingVoucherId={claimingVoucherId}
                 isFavorited={isFavorited}

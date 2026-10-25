@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Services\VoucherService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class CustomerCartController extends Controller
 {
@@ -19,7 +20,7 @@ class CustomerCartController extends Controller
 
     public function show(Request $request, VoucherService $vouchers)
     {
-        $cart = $this->cart($request)->load('items.product.shop', 'items.product.images', 'items.product.category', 'items.variant', 'voucher');
+        $cart = $this->cart($request)->load('items.product.shop', 'items.product.images', 'items.product.category', 'items.product.variants', 'items.variant', 'voucher');
         $cart->items->each(function (CartItem $item) {
             $shop = $item->product?->shop;
 
@@ -80,10 +81,41 @@ class CustomerCartController extends Controller
 
     public function update(Request $request, CartItem $item)
     {
-        abort_unless($item->cart->user_id === $request->user()->id, 403);
-        $item->update($request->validate(['quantity' => 'required|integer|min:1']));
+        $data = $request->validate(['quantity' => 'required|integer|min:1']);
 
-        return $item;
+        return DB::transaction(function () use ($request, $item, $data) {
+            $cartItem = CartItem::query()->whereKey($item->getKey())->lockForUpdate()->firstOrFail();
+            abort_unless($cartItem->cart()->where('user_id', $request->user()->id)->exists(), 403);
+
+            $product = Product::published()->whereKey($cartItem->product_id)->lockForUpdate()->first();
+            abort_unless($product, 422, 'This product is no longer available.');
+
+            if ($cartItem->variant_id) {
+                $variant = ProductVariant::query()
+                    ->whereKey($cartItem->variant_id)
+                    ->where('product_id', $product->id)
+                    ->where('is_active', true)
+                    ->lockForUpdate()
+                    ->first();
+                abort_unless($variant, 422, 'This product variant is no longer available.');
+                $availableStock = (int) $variant->stock_quantity;
+            } else {
+                $variants = ProductVariant::query()
+                    ->where('product_id', $product->id)
+                    ->where('is_active', true)
+                    ->lockForUpdate()
+                    ->get(['stock_quantity']);
+                $availableStock = $variants->isNotEmpty()
+                    ? (int) $variants->sum('stock_quantity')
+                    : (int) $product->stock_quantity;
+            }
+
+            abort_if($data['quantity'] > $availableStock, 422, 'The requested quantity exceeds available stock.');
+
+            $cartItem->update(['quantity' => $data['quantity']]);
+
+            return $cartItem->load('product.variants', 'variant');
+        });
     }
 
     public function destroy(Request $request, CartItem $item)

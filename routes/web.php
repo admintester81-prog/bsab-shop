@@ -7,6 +7,7 @@ use App\Http\Controllers\AdminFooterController;
 use App\Http\Controllers\AdminProductController;
 use App\Http\Controllers\AdminSettingsController;
 use App\Http\Controllers\AdminUserController;
+use App\Http\Controllers\DeliveryController;
 use App\Http\Controllers\AI\ProductAIController;
 use App\Http\Controllers\Auth\AdminRegistrationController;
 use App\Http\Controllers\LaravelCrudTesterController;
@@ -240,7 +241,14 @@ Route::get('/test-gemini', function () use ($extractGeminiDiagnosticError) {
     ], 404);
 })->name('test.gemini');
 
-Route::get('/products/{product}', function (Request $request, Product $product, VoucherService $vouchers) {
+Route::get('/products/{product}', function (Request $request, string $product, VoucherService $vouchers) {
+    if (ctype_digit($product)) {
+        $legacyProduct = Product::findOrFail((int) $product);
+
+        return redirect()->route('products.show', $legacyProduct->uuid, 301);
+    }
+
+    $product = Product::query()->where('uuid', $product)->firstOrFail();
     abort_unless(Product::published()->whereKey($product->getKey())->exists(), 404);
 
     $withMetrics = Schema::hasTable('product_metrics');
@@ -260,9 +268,28 @@ Route::get('/products/{product}', function (Request $request, Product $product, 
                 ->orWhere('shop_id', $product->shop_id);
         })
         ->with($similarProductRelations)
+        ->withSum(['variants as active_variant_stock' => fn ($query) => $query->where('is_active', true)], 'stock_quantity')
+        ->withCount('variants')
+        ->when(
+            $request->user(),
+            fn ($query) => $query->withExists([
+                'wishlists as is_favorited' => fn ($wishlistQuery) => $wishlistQuery->where('user_id', $request->user()->id),
+            ]),
+        )
         ->latest()
         ->limit(4)
-        ->get();
+        ->get()
+        ->map(function (Product $similarProduct) {
+            $availableStock = $similarProduct->variants_count > 0
+                ? (int) ($similarProduct->active_variant_stock ?? 0)
+                : (int) $similarProduct->stock_quantity;
+
+            return array_merge($similarProduct->toArray(), [
+                'available_stock' => $availableStock,
+                'is_out_of_stock' => $availableStock < 1,
+                'is_favorited' => (bool) ($similarProduct->is_favorited ?? false),
+            ]);
+        });
 
     $productRelations = [
         'shop:id,name',
@@ -310,6 +337,10 @@ Route::get('/dashboard', function (Request $request) {
 
     if ($request->user()->hasRole('seller')) {
         return to_route('seller.dashboard');
+    }
+
+    if ($request->user()->hasRole('rider')) {
+        return to_route('delivery-list');
     }
 
     return to_route('home');
@@ -533,6 +564,18 @@ Route::middleware(['auth', 'role:customer'])->prefix('customer')->group(function
 
         return redirect()->route('customer.order-tracking', ['order_id' => $order->id]);
     })->name('customer.order');
+});
+
+Route::middleware('auth')->group(function () {
+    Route::get('/delivery-list', [DeliveryController::class, 'index'])->name('delivery-list');
+    Route::post('/delivery-list/orders/{order}/assign', [DeliveryController::class, 'assign'])->name('delivery-list.assign');
+    Route::post('/delivery-list/{delivery}/start', [DeliveryController::class, 'start'])->name('delivery-list.start');
+    Route::post('/delivery-list/{delivery}/arrive', [DeliveryController::class, 'arrive'])->name('delivery-list.arrive');
+    Route::post('/delivery-list/{delivery}/submit', [DeliveryController::class, 'submit'])->name('delivery-list.submit');
+    Route::post('/delivery-list/{delivery}/fail', [DeliveryController::class, 'fail'])->name('delivery-list.fail');
+    Route::post('/delivery-list/{delivery}/confirm-received', [DeliveryController::class, 'confirmReceived'])->name('delivery-list.confirm');
+    Route::post('/delivery-list/{delivery}/reject', [DeliveryController::class, 'reject'])->name('delivery-list.reject');
+    Route::get('/delivery-list/{delivery}/proof', [DeliveryController::class, 'proof'])->name('delivery-list.proof');
 });
 
 Route::middleware('auth')->prefix('settings')->group(function () {

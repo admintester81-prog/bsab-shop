@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 
-type PortalRole = 'admin' | 'seller' | 'customer';
+type PortalRole = 'admin' | 'seller' | 'rider' | 'customer';
 
 type NavigationItem = { label: string; href: string; icon: typeof BarChart3 };
 
@@ -41,6 +41,7 @@ const navigation: Record<PortalRole, NavigationItem[]> = {
     admin: [
         { label: 'Products', href: '/admin/products', icon: Package },
         { label: 'Orders', href: '/admin/orders', icon: ClipboardList },
+        { label: 'Deliveries', href: '/delivery-list', icon: Truck },
         { label: 'Categories', href: '/admin/categories', icon: Tags },
         { label: 'Sellers', href: '/admin/sellers', icon: Store },
         { label: 'Customers', href: '/admin/customers', icon: Users },
@@ -55,15 +56,18 @@ const navigation: Record<PortalRole, NavigationItem[]> = {
         { label: 'Overview', href: '/seller', icon: LayoutDashboard },
         { label: 'Products', href: '/seller/products', icon: Package },
         { label: 'Orders', href: '/seller/orders', icon: ClipboardList },
+        { label: 'Delivery progress', href: '/delivery-list', icon: Truck },
         { label: 'Profile', href: '/seller/profile', icon: CircleUserRound },
         { label: 'Shop Profile', href: '/seller/shop', icon: Store },
         { label: 'Vouchers', href: '/seller/vouchers', icon: TicketPercent },
     ],
+    rider: [{ label: 'My deliveries', href: '/delivery-list', icon: Truck }],
     customer: [
         { label: 'Profile', href: '/customer/profile', icon: CircleUserRound },
         { label: 'Products', href: '/customer/products', icon: Tags },
         { label: 'Favorites', href: '/customer/favorites', icon: Heart },
         { label: 'My orders', href: '/customer/orders', icon: Package },
+        { label: 'Delivery updates', href: '/delivery-list', icon: Truck },
         { label: 'My vouchers', href: '/customer/vouchers', icon: TicketPercent },
         { label: 'Cart', href: '/customer/cart', icon: ShoppingCart },
         { label: 'Profile', href: '/customer/profile', icon: Settings },
@@ -75,6 +79,7 @@ const adminNavigationGroups: { label: string; items: NavigationItem[] }[] = [
     [
         { label: 'Products', href: '/admin/products', icon: Package },
         { label: 'Orders', href: '/admin/orders', icon: ClipboardList },
+        { label: 'Deliveries', href: '/delivery-list', icon: Truck },
         { label: 'Categories', href: '/admin/categories', icon: Tags },
         { label: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
     ],
@@ -101,11 +106,16 @@ const sellerNavigation: Array<NavigationItem & { badge?: number }> = [
     { label: 'My Shop', href: '/seller/shop', icon: Store },
     { label: 'Products', href: '/seller/products', icon: Package },
     { label: 'Orders', href: '/seller/orders', icon: ClipboardList, badge: 3 },
+    { label: 'Delivery progress', href: '/delivery-list', icon: Truck },
     { label: 'Customers', href: '/seller/customers', icon: UsersRound },
     { label: 'Analytics', href: '/seller/analytics', icon: BarChart3 },
     { label: 'Vouchers', href: '/seller/vouchers', icon: TicketPercent },
     { label: 'Payments', href: '/seller/payments', icon: CircleDollarSign },
     { label: 'Settings', href: '/seller/settings', icon: Settings },
+];
+
+const riderNavigation: NavigationItem[] = [
+    { label: 'My deliveries', href: '/delivery-list', icon: Truck },
 ];
 
 export function PortalLayout({
@@ -240,7 +250,23 @@ export function PortalLayout({
                                     </Link>
                                 );
                             })
-                          : navigation.customer.map((item) => {
+                          : role === 'rider'
+                            ? riderNavigation.map((item) => {
+                                  const Icon = item.icon;
+                                  const active = url === item.href || url.startsWith(`${item.href}/`);
+                                  return (
+                                      <Link
+                                          key={item.href}
+                                          href={item.href}
+                                          className={`flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm transition ${active ? 'bg-[#e6f7eb] font-semibold text-[#1f7a42]' : 'font-medium text-[#17281d]/70 hover:bg-[#f5fcf7] hover:text-[#1f7a42]'}`}
+                                      >
+                                          <Icon size={18} />
+                                          {item.label}
+                                          {active && <ChevronRight size={15} className="ml-auto" />}
+                                      </Link>
+                                  );
+                              })
+                            : navigation.customer.map((item) => {
                                 const Icon = item.icon;
                                 const active = url === item.href || (item.href !== `/${role}` && url.startsWith(item.href));
                                 return (

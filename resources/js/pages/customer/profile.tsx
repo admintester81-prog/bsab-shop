@@ -268,7 +268,7 @@ export default function CustomerProfile() {
 
                 {/* ── Top Header ── */}
                 <header className="relative z-30 border-b border-[#e5eee7] bg-white">
-                    <div className="mx-auto flex h-[70px] w-full max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
+                    <div className="mx-auto hidden h-[70px] w-full max-w-7xl items-center gap-4 px-4 sm:px-6 lg:flex lg:px-8">
                         {/* ── Brand ── */}
                         <Link href="/" className="flex shrink-0 items-center gap-2" aria-label={`${brandName} home`}>
                             {logoPath ? (

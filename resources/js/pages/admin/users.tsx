@@ -14,6 +14,7 @@ import {
     ShieldEllipsis,
     Store,
     Trash2,
+    Truck,
     UserRound,
     UsersRound,
     X,
@@ -38,6 +39,7 @@ type UserStats = {
     total: number;
     admins: number;
     sellers: number;
+    logistics: number;
     customers: number;
     active: number;
     suspended: number;
@@ -71,6 +73,7 @@ function roleName(user: AdminUser) {
 function roleClass(role: string) {
     if (role === 'admin') return 'bg-[#f0edff] text-[#7164b5]';
     if (role === 'seller') return 'bg-[#e9f5fb] text-[#4282a2]';
+    if (role === 'rider') return 'bg-[#e9f1fb] text-[#3d719e]';
     return 'bg-[#e5f6f3] text-[#288779]';
 }
 
@@ -443,6 +446,7 @@ export default function AdminUsers({ users, userStats, activity }: Props) {
                                     <option value="all">All roles</option>
                                     <option value="admin">Admins</option>
                                     <option value="seller">Sellers</option>
+                                    <option value="rider">Logistics</option>
                                     <option value="customer">Customers</option>
                                 </select>
                                 <select
@@ -521,7 +525,7 @@ export default function AdminUsers({ users, userStats, activity }: Props) {
                                             </td>
                                             <td className="px-4 py-2.5">
                                                 <span className={`rounded-full px-2 py-1 text-[9px] font-semibold capitalize ${roleClass(userRole)}`}>
-                                                    {userRole}
+                                                    {userRole === 'rider' ? 'Logistics' : userRole}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-2.5">
@@ -681,6 +685,7 @@ export default function AdminUsers({ users, userStats, activity }: Props) {
                                 segments={[
                                     { label: 'Admins', value: userStats.admins, color: '#9bceae' },
                                     { label: 'Sellers', value: userStats.sellers, color: '#52b86e' },
+                                    { label: 'Logistics', value: userStats.logistics, color: '#4a9bd4' },
                                     { label: 'Customers', value: userStats.customers, color: '#14864d' },
                                 ]}
                             />
@@ -688,6 +693,7 @@ export default function AdminUsers({ users, userStats, activity }: Props) {
                                 {[
                                     ['Admins', userStats.admins, '#9bceae'],
                                     ['Sellers', userStats.sellers, '#52b86e'],
+                                    ['Logistics', userStats.logistics, '#4a9bd4'],
                                     ['Customers', userStats.customers, '#14864d'],
                                 ].map(([label, value, color]) => (
                                     <div key={String(label)} className="flex items-center justify-between gap-1 text-[9px] text-[#6c7d72]">
@@ -729,10 +735,11 @@ export default function AdminUsers({ users, userStats, activity }: Props) {
                         </div>
                     </Panel>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-7">
                     <StatCard label="Total users" value={userStats.total} detail="All accounts" Icon={UsersRound} />
                     <StatCard label="Admins" value={userStats.admins} detail="Admin accounts" Icon={ShieldEllipsis} />
                     <StatCard label="Sellers" value={userStats.sellers} detail="Seller accounts" Icon={Store} />
+                    <StatCard label="Logistics" value={userStats.logistics} detail="Delivery accounts" Icon={Truck} />
                     <StatCard label="Customers" value={userStats.customers} detail="Customer accounts" Icon={UserRound} />
                     <StatCard label="Active users" value={userStats.active} detail="Currently enabled" Icon={ShieldCheck} />
                     <StatCard label="Suspended users" value={userStats.suspended} detail="Access suspended" Icon={X} />
@@ -802,6 +809,7 @@ export default function AdminUsers({ users, userStats, activity }: Props) {
                                 >
                                     <option value="admin">Admin</option>
                                     <option value="seller">Seller</option>
+                                    <option value="rider">Logistics</option>
                                     <option value="customer">Customer</option>
                                 </select>
                                 {form.errors.role && <span className="mt-1 block text-[10px] text-red-600">{form.errors.role}</span>}

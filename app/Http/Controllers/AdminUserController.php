@@ -45,6 +45,7 @@ class AdminUserController extends Controller
                 'total' => $users->count(),
                 'admins' => $users->where('role', 'admin')->count(),
                 'sellers' => $users->where('role', 'seller')->count(),
+                'logistics' => $users->where('role', 'rider')->count(),
                 'customers' => $users->where('role', 'customer')->count(),
                 'active' => $users->filter(fn (User $user) => ($user->status ?? 'active') === 'active')->count(),
                 'suspended' => $users->filter(fn (User $user) => $user->status === 'suspended')->count(),
@@ -129,7 +130,7 @@ class AdminUserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
-            'role' => ['required', Rule::in(['admin', 'seller', 'customer'])],
+            'role' => ['required', Rule::in(['admin', 'seller', 'rider', 'customer'])],
             'status' => ['required', Rule::in(['active', 'suspended'])],
             'avatar' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:'.config('images.max_upload_kb')],
         ]);
@@ -157,7 +158,7 @@ class AdminUserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'password' => ['nullable', 'confirmed', Rules\Password::defaults()],
-            'role' => ['required', Rule::in(['admin', 'seller', 'customer'])],
+            'role' => ['required', Rule::in(['admin', 'seller', 'rider', 'customer'])],
             'status' => ['required', Rule::in(['active', 'suspended'])],
             'avatar' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:'.config('images.max_upload_kb')],
         ]);

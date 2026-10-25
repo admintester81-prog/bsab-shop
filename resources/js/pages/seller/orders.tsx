@@ -1,5 +1,6 @@
 import { Head } from '@inertiajs/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import QRCode from 'qrcode';
 import {
 	AlertCircle,
 	ArrowLeft,
@@ -11,11 +12,13 @@ import {
 	ChevronDown,
 	CircleDollarSign,
 	Clock3,
+	Copy,
 	Download,
 	Eye,
 	Filter,
 	Package,
 	Printer,
+	QrCode as QrCodeIcon,
 	Search,
 	ShoppingBag,
 	Truck,
@@ -34,9 +37,9 @@ import {
 	XAxis,
 	YAxis,
 } from 'recharts';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PortalLayout } from '@/components/portal-layout';
-import { api, prepareSanctum } from '@/lib/api';
+import { api, getApiErrorMessage, prepareSanctum } from '@/lib/api';
 
 type OrderStatus = 'pending' | 'processing' | 'accepted' | 'declined' | 'shipped' | 'delivered' | 'cancelled';
 type SellerOrderItem = {
@@ -530,6 +533,99 @@ function OrderRow({ item, updatePending, onAccept, onDecline, onDetails }: { ite
 	);
 }
 
+function SellerOrderTrackingQrCard({ orderId, orderNumber }: { orderId?: number; orderNumber: string | number }) {
+	const [trackingUrl, setTrackingUrl] = useState('');
+	const [qrImage, setQrImage] = useState('');
+	const [qrError, setQrError] = useState('');
+	const [qrLoading, setQrLoading] = useState(Boolean(orderId));
+	const [copyMessage, setCopyMessage] = useState('');
+
+	useEffect(() => {
+		if (!orderId) {
+			setQrLoading(false);
+			setQrError('Tracking is unavailable for this order.');
+			return;
+		}
+
+		let cancelled = false;
+		setQrLoading(true);
+		setQrError('');
+		setQrImage('');
+
+		const url = new URL('/customer/order-tracking', window.location.origin);
+		url.searchParams.set('order_id', String(orderId));
+		setTrackingUrl(url.toString());
+		QRCode.toDataURL(url.toString(), {
+			errorCorrectionLevel: 'H',
+			margin: 2,
+			width: 320,
+			color: { dark: '#145b52', light: '#ffffff' },
+		}).then(
+			(image) => {
+				if (cancelled) return;
+				setQrImage(image);
+				setQrLoading(false);
+			},
+			(error: unknown) => {
+				if (cancelled) return;
+				setQrError(getApiErrorMessage(error, 'The tracking QR code could not be generated.'));
+				setQrLoading(false);
+			},
+		);
+
+		return () => {
+			cancelled = true;
+		};
+	}, [orderId]);
+
+	async function copyTrackingUrl() {
+		try {
+			await navigator.clipboard.writeText(trackingUrl);
+			setCopyMessage('Tracking link copied.');
+		} catch {
+			setCopyMessage('Could not copy the tracking link. Please copy it from the browser address bar.');
+		}
+	}
+
+	return (
+		<section className="rounded-lg border border-[#edf1ee] p-3">
+			<div className="mb-3 flex items-center gap-2">
+				<span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#e8f5ec] text-[#188747]"><QrCodeIcon size={17} /></span>
+				<div>
+					<h3 className="text-xs font-bold text-[#26382d]">Order Tracking QR Code</h3>
+					<p className="mt-0.5 text-[10px] text-[#7c8981]">Scan to open this order’s customer tracking page.</p>
+				</div>
+			</div>
+			<div className="grid items-center gap-3 sm:grid-cols-[112px_minmax(0,1fr)]">
+				<div className="flex min-h-28 items-center justify-center rounded-lg border border-[#c6ebd4] bg-white p-2 text-center" aria-live="polite">
+					{qrLoading ? (
+						<span className="text-[10px] text-[#78988f]">Generating QR code…</span>
+					) : qrError ? (
+						<span className="text-[10px] text-[#a94435]" role="alert">{qrError}</span>
+					) : (
+						<img src={qrImage} alt="QR code linking to this order's customer tracking page" className="block h-auto w-full max-w-24 [image-rendering:pixelated]" />
+					)}
+				</div>
+				<div className="min-w-0">
+					<p className="break-all text-xs font-extrabold text-[#145b52]">{orderNumber}</p>
+					<p className="mt-1 text-[10px] text-[#78988f]">Customers must sign in to view order tracking.</p>
+					<div className="mt-2 flex flex-wrap gap-2">
+						{qrImage && (
+							<a href={qrImage} download={`order-${orderNumber}-tracking-qr.png`} className="inline-flex items-center gap-1.5 rounded-lg border border-[#d5e3d9] px-2.5 py-2 text-[10px] font-semibold text-[#346848] hover:bg-[#f5faf6]">
+								<Download size={13} /> Download QR Code
+							</a>
+						)}
+						<button type="button" onClick={copyTrackingUrl} disabled={!trackingUrl} className="inline-flex items-center gap-1.5 rounded-lg border border-[#d5e3d9] px-2.5 py-2 text-[10px] font-semibold text-[#346848] hover:bg-[#f5faf6] disabled:opacity-50">
+							<Copy size={13} /> Copy Tracking Link
+						</button>
+					</div>
+					{copyMessage && <p className="mt-2 text-[10px] font-semibold text-[#138a55]" role="status">{copyMessage}</p>}
+				</div>
+			</div>
+		</section>
+	);
+}
+
 function OrderDetails({ item, busy, onClose, onUpdate }: { item: SellerOrderItem; busy: boolean; onClose: () => void; onUpdate: (status: OrderStatus) => void }) {
 	const productImage = imageUrl(item);
 	const order = item.order;
@@ -578,6 +674,7 @@ function OrderDetails({ item, busy, onClose, onUpdate }: { item: SellerOrderItem
 						<Detail label="Order status" value={displayStatus(item.fulfillment_status)} />
 						<Detail label="Shipping address" value={addressText(order?.shipping_address)} className="sm:col-span-2" />
 					</div>
+					<SellerOrderTrackingQrCard orderId={order?.id} orderNumber={orderNumber} />
 					{busy && <p className="text-xs text-[#718076]">Updating order…</p>}
 					<div className="flex flex-wrap justify-end gap-2 border-t border-[#edf1ee] pt-3">
 						<button type="button" onClick={() => window.print()} className="inline-flex items-center gap-2 rounded-lg border border-[#d5e3d9] px-3 py-2 text-xs font-semibold text-[#346848] hover:bg-[#f5faf6]"><Printer size={14} /> Print invoice</button>
@@ -585,7 +682,6 @@ function OrderDetails({ item, busy, onClose, onUpdate }: { item: SellerOrderItem
 							<button type="button" disabled={busy} onClick={() => onUpdate('accepted')} className="rounded-lg bg-[#188747] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Accept Order</button>
 							<button type="button" disabled={busy} onClick={() => onUpdate('declined')} className="rounded-lg border border-[#d99a9a] px-3 py-2 text-xs font-semibold text-[#a64848] disabled:opacity-50">Decline</button>
 						</>}
-						<label className="flex items-center gap-2 text-[10px] text-[#68766d]">Update status <select disabled={busy} value={item.fulfillment_status} onChange={(event) => onUpdate(event.target.value as OrderStatus)} className="rounded-lg border border-[#dfe7e1] bg-white px-2 py-2 text-xs"><option value="processing">Processing</option><option value="accepted">Accepted</option><option value="declined">Declined</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label>
 					</div>
 				</div>
 			</div>

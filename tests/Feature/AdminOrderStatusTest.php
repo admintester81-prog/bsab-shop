@@ -60,7 +60,6 @@ class AdminOrderStatusTest extends TestCase
             'processing' => 'processing',
             'accepted' => 'accepted',
             'shipped' => 'shipped',
-            'delivered' => 'delivered',
             'cancelled' => 'cancelled',
         ];
 
@@ -77,6 +76,15 @@ class AdminOrderStatusTest extends TestCase
                 'fulfillment_status' => $fulfillmentStatus,
             ]);
         }
+
+        $this->actingAs($admin)
+            ->patchJson("/api/admin/orders/{$order->id}", ['status' => 'delivered'])
+            ->assertStatus(422);
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $order->id,
+            'status' => 'cancelled',
+        ]);
 
         $this->actingAs($customer)
             ->getJson('/api/customer/orders')

@@ -1,7 +1,9 @@
 import { addCartItem, getApiErrorMessage } from '@/lib/api';
+import ProductCard from '@/components/ProductCard';
 import type { Product, ProductOption, ProductOptionValue, ProductVariant, VoucherOffer } from '@/pages/customer/product-detail';
 import { type SharedData } from '@/types';
 import { Link, router, usePage } from '@inertiajs/react';
+import '../../css/design.css';
 import {
     ArrowLeft,
     ArrowRight,
@@ -49,7 +51,8 @@ type ResponsiveProductDetailProps = {
     onChangeImage: (direction: 1 | -1) => void;
     onSelectImage: (path: string) => void;
     onClaimVoucher: (voucherId: number) => void;
-    onUseVoucher: (voucher: VoucherOffer) => void;
+    onUseVoucher: (voucher: VoucherOffer, quantity: number) => void;
+    actionMessage: string;
     claimedVoucherIds: number[];
     claimingVoucherId: number | null;
     isFavorited: boolean;
@@ -105,6 +108,7 @@ export default function ResponsiveProductDetail({
     onSelectImage,
     onClaimVoucher,
     onUseVoucher,
+    actionMessage,
     claimedVoucherIds,
     claimingVoucherId,
     isFavorited,
@@ -118,6 +122,7 @@ export default function ResponsiveProductDetail({
     const [accountOpen, setAccountOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<'description' | 'reviews' | 'shipping'>('description');
     const [showSizeGuide, setShowSizeGuide] = useState(false);
+    const [favoriteOverrides, setFavoriteOverrides] = useState<Record<number, boolean>>({});
 
     const brandName = siteSettings.brand_name || 'BSABShop';
     const logoPath = siteSettings.logo_path ? imageUrl(siteSettings.logo_path) : null;
@@ -148,6 +153,21 @@ export default function ResponsiveProductDetail({
     const highlights = details.filter(([label]) => !['SKU', 'Model'].includes(label)).slice(0, 4);
     const sizeOption = variantOptions.find((option) => /size/i.test(option.name));
     const organicProduct = /organic/i.test([product.name, product.description, product.material].filter(Boolean).join(' '));
+
+    const toggleSimilarFavorite = (item: Product) => {
+        if (!auth.user) {
+            router.visit(route('login'));
+            return;
+        }
+
+        const wasFavorited = favoriteOverrides[item.id] ?? Boolean(item.is_favorited);
+        setFavoriteOverrides((current) => ({ ...current, [item.id]: !wasFavorited }));
+        router.post(route('customer.favorites.toggle', item.id), {}, {
+            preserveScroll: true,
+            preserveState: true,
+            onError: () => setFavoriteOverrides((current) => ({ ...current, [item.id]: wasFavorited })),
+        });
+    };
 
     const purchase = async (buyNow: boolean) => {
         if (!auth.user) {
@@ -693,7 +713,7 @@ export default function ResponsiveProductDetail({
                                                 ) : (
                                                     <button
                                                         type="button"
-                                                        onClick={() => onUseVoucher(voucher)}
+                                                        onClick={() => onUseVoucher(voucher, quantity)}
                                                         className="rounded-lg border border-[#c6dfcb] px-2.5 py-1.5 text-[10px] font-bold text-[#168247]"
                                                     >
                                                         Use now
@@ -709,6 +729,7 @@ export default function ResponsiveProductDetail({
                                     {voucherAvailabilityError}
                                 </p>
                             )}
+                            {actionMessage && <p role="status" className="mt-3 text-xs font-semibold text-[#285d3b]">{actionMessage}</p>}
                         </div>
                     </div>
 
@@ -839,21 +860,13 @@ export default function ResponsiveProductDetail({
                         </div>
                         <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
                             {similarProducts.slice(0, 4).map((item) => (
-                                <Link
+                                <ProductCard
                                     key={item.id}
-                                    href={route('products.show', item.id)}
-                                    className="overflow-hidden rounded-xl border border-[#e0ebe1] bg-white p-2 transition hover:shadow-md"
-                                >
-                                    <div className="flex aspect-[1.15/1] items-center justify-center overflow-hidden rounded-lg bg-[#edf5ee]">
-                                        {item.images?.[0]?.path ? (
-                                            <img src={imageUrl(item.images[0].path) ?? ''} alt={item.name} className="h-full w-full object-contain" />
-                                        ) : (
-                                            <Package size={38} className="text-[#2e7c4a]" />
-                                        )}
-                                    </div>
-                                    <div className="mt-2 line-clamp-2 text-xs font-semibold text-[#1a3d29]">{item.name}</div>
-                                    <div className="mt-1 text-sm font-bold text-[#168247]">{formatPrice(item.sale_price ?? item.base_price)}</div>
-                                </Link>
+                                    product={item}
+                                    liked={favoriteOverrides[item.id] ?? Boolean(item.is_favorited)}
+                                    onToggleFavorite={() => toggleSimilarFavorite(item)}
+                                    onOpenProduct={() => router.visit(route('products.show', item.uuid))}
+                                />
                             ))}
                         </div>
                     </section>

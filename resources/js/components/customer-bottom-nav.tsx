@@ -38,7 +38,7 @@ export default function CustomerBottomNav() {
                         key={href}
                         href={destination}
                         aria-current={active ? 'page' : undefined}
-                        className={`relative flex flex-col items-center gap-1 text-[10px] transition ${
+                        className={`relative flex min-h-11 min-w-11 flex-col items-center justify-center gap-1 px-1 text-[10px] transition ${
                             active ? 'font-bold text-[#1f7a42]' : 'font-semibold text-[#9a9aa5] hover:text-[#1f7a42]'
                         }`}
                     >

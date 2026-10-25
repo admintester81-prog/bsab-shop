@@ -1,6 +1,7 @@
 import { type SharedData } from '@/types';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import CustomerBottomNav from '@/components/customer-bottom-nav';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import {
     ArrowRight,
     Check,
@@ -30,6 +31,7 @@ import { useMemo, useState } from 'react';
 type Category = { id: number; name: string; slug: string; image?: string | null; products_count: number };
 type Product = {
     id: number;
+    uuid: string;
     name: string;
     description?: string;
     base_price: string;
@@ -135,6 +137,7 @@ export default function Welcome({
     const [search, setSearch] = useState(query);
     const [liked, setLiked] = useState<number[]>(() => products.filter((product) => product.is_favorited).map((product) => product.id));
     const [accountOpen, setAccountOpen] = useState(false);
+    const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
     const [filterOpen, setFilterOpen] = useState(false);
     const [sortBy, setSortBy] = useState<'default' | 'price-asc' | 'price-desc' | 'rating'>('default');
     const [inStockOnly, setInStockOnly] = useState(false);
@@ -190,7 +193,7 @@ export default function Welcome({
     const productFeed = sortedAndFilteredProducts;
 
     function openProduct(product: Product) {
-        router.visit(route('products.show', product.id));
+        router.visit(route('products.show', product.uuid));
     }
 
     function toggleFavorite(productId: number) {
@@ -219,19 +222,100 @@ export default function Welcome({
             <div className="marketplace-page min-h-screen bg-[#f7fbf7] text-[#173b2a] antialiased">
                 <header className="border-b border-[#e5eee7] bg-white">
                     <div className="mx-auto flex w-full max-w-110 flex-wrap items-center gap-3 px-4 py-3 min-[430px]:max-[640px]:max-w-full min-[430px]:max-[640px]:gap-2 min-[430px]:max-[640px]:px-3 min-[430px]:max-[640px]:py-2.5 sm:max-w-195 sm:px-5 lg:max-w-7xl lg:flex-nowrap lg:gap-5 lg:px-8">
+                        <Sheet open={mobileNavigationOpen} onOpenChange={setMobileNavigationOpen}>
+                            <SheetTrigger asChild>
+                                <button
+                                    type="button"
+                                    className="flex shrink-0 items-center gap-2 text-left min-[430px]:max-[640px]:gap-1.5 min-[430px]:max-[640px]:min-w-0 lg:hidden"
+                                    aria-label={`Open ${brandName} navigation`}
+                                >
+                                    {logoPath ? (
+                                        <img src={logoPath} alt={brandName} className="h-9 w-9 rounded-full object-cover min-[430px]:max-[640px]:h-8 min-[430px]:max-[640px]:w-8" />
+                                    ) : (
+                                        <span className="flex h-9 w-9 items-center justify-center rounded-full text-[#25804a] min-[430px]:max-[640px]:h-8 min-[430px]:max-[640px]:w-8">
+                                            <Sparkles size={18} />
+                                        </span>
+                                    )}
+                                    <span className="font-display text-xl font-bold text-[#145c3d] min-[430px]:max-[640px]:text-lg">{brandName}</span>
+                                </button>
+                            </SheetTrigger>
+                            <SheetContent side="left" className="flex w-80 max-w-[85vw] flex-col bg-white p-0 lg:hidden">
+                                <SheetHeader className="border-b border-[#e5eee7] px-5 py-4 text-left">
+                                    <SheetTitle className="flex items-center gap-2 font-display text-lg font-bold text-[#145c3d]">
+                                        {logoPath ? (
+                                            <img src={logoPath} alt="" className="h-9 w-9 rounded-full object-cover" />
+                                        ) : (
+                                            <Sparkles size={22} />
+                                        )}
+                                        {brandName}
+                                    </SheetTitle>
+                                </SheetHeader>
+                                <nav aria-label="Mobile and tablet navigation" className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
+                                    {[
+                                        { label: 'Home', href: route('home'), icon: Home },
+                                        { label: 'Products', href: route('customer.products'), icon: Grid2X2 },
+                                        { label: 'Orders', href: route('customer.orders'), icon: Package },
+                                        { label: 'Favorites', href: route('customer.favorites'), icon: Heart },
+                                        { label: 'Cart', href: route('customer.cart'), icon: ShoppingCart },
+                                        { label: 'Vouchers', href: route('customer.vouchers'), icon: TicketPercent },
+                                    ].map(({ label, href, icon: Icon }) => (
+                                        <Link
+                                            key={label}
+                                            href={!auth.user && label !== 'Home' ? route('login') : href}
+                                            onClick={() => setMobileNavigationOpen(false)}
+                                            className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold text-[#315947] transition hover:bg-[#f0f8f2] hover:text-[#1f7a42]"
+                                        >
+                                            <Icon size={19} />
+                                            <span>{label}</span>
+                                            {label === 'Cart' && cartCount > 0 && (
+                                                <span className="ml-auto rounded-full bg-[#2a9b59] px-2 py-0.5 text-xs font-bold text-white">
+                                                    {cartCount > 99 ? '99+' : cartCount}
+                                                </span>
+                                            )}
+                                            {label === 'Vouchers' && newVoucherCount > 0 && (
+                                                <span className="ml-auto rounded-full bg-[#2a9b59] px-2 py-0.5 text-xs font-bold text-white">
+                                                    {newVoucherCount > 99 ? '99+' : newVoucherCount}
+                                                </span>
+                                            )}
+                                        </Link>
+                                    ))}
+                                    <div className="mt-auto border-t border-[#e5eee7] pt-4">
+                                        {auth.user ? (
+                                            <Link
+                                                href={route('logout')}
+                                                method="post"
+                                                as="button"
+                                                onClick={() => setMobileNavigationOpen(false)}
+                                                className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold text-[#c85b4d] transition hover:bg-[#fdf0ed]"
+                                            >
+                                                <LogOut size={19} /> Log out
+                                            </Link>
+                                        ) : (
+                                            <Link
+                                                href={route('login')}
+                                                onClick={() => setMobileNavigationOpen(false)}
+                                                className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold text-[#1f7a42] transition hover:bg-[#f0f8f2]"
+                                            >
+                                                <UserRound size={19} /> Log in
+                                            </Link>
+                                        )}
+                                    </div>
+                                </nav>
+                            </SheetContent>
+                        </Sheet>
                         <Link
                             href={route('home')}
-                            className="flex shrink-0 items-center gap-2 min-[430px]:max-[640px]:gap-1.5 min-[430px]:max-[640px]:min-w-0"
+                            className="hidden shrink-0 items-center gap-2 lg:flex"
                             aria-label={`${brandName} home`}
                         >
                             {logoPath ? (
-                                <img src={logoPath} alt={brandName} className="h-9 w-9 rounded-full object-cover min-[430px]:max-[640px]:h-8 min-[430px]:max-[640px]:w-8" />
+                                <img src={logoPath} alt={brandName} className="h-9 w-9 rounded-full object-cover" />
                             ) : (
-                                <span className="flex h-9 w-9 items-center justify-center rounded-full text-[#25804a] min-[430px]:max-[640px]:h-8 min-[430px]:max-[640px]:w-8">
+                                <span className="flex h-9 w-9 items-center justify-center rounded-full text-[#25804a]">
                                     <Sparkles size={18} />
                                 </span>
                             )}
-                            <span className="font-display text-xl font-bold text-[#145c3d] min-[430px]:max-[640px]:text-lg">{brandName}</span>
+                            <span className="font-display text-xl font-bold text-[#145c3d]">{brandName}</span>
                         </Link>
                         <nav className="hidden items-center gap-1 sm:ml-auto lg:flex" aria-label="Desktop navigation">
                             <Link

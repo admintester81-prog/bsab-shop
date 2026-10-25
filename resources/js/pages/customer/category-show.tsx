@@ -4,6 +4,7 @@ import { ArrowLeft, Package, Search, ShoppingCart, Star } from 'lucide-react';
 
 type Product = {
     id: number;
+    uuid: string;
     name: string;
     description?: string | null;
     base_price: string;
@@ -109,7 +110,7 @@ export default function CustomerCategoryShow({ category, products = [] }: Catego
                                                 ₱{Number(price).toLocaleString()}
                                             </div>
                                             <Link
-                                                href={route('products.show', product.id)}
+                                                href={route('products.show', product.uuid)}
                                                 className="flex w-full items-center justify-center gap-2 rounded-[10px] bg-[#48ad68] px-2 py-2.5 text-xs font-bold text-white"
                                             >
                                                 <ShoppingCart size={14} /> View product

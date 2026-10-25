@@ -27,5 +27,6 @@ class RolesAndPermissionsSeeder extends Seeder
         Role::findOrCreate('customer', 'web')->syncPermissions([
             'place-order', 'manage-own-cart', 'write-review', 'manage-own-addresses',
         ]);
+        Role::findOrCreate('rider', 'web');
     }
 }

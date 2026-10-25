@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\Cart;
+use App\Models\CartItem;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductVariant;
@@ -89,5 +91,68 @@ class VariantAwareCartOwnershipTest extends TestCase
             ]);
 
         $response->assertStatus(422);
+    }
+
+    public function test_cart_quantity_cannot_exceed_the_selected_variant_stock(): void
+    {
+        Role::findOrCreate('customer');
+
+        $user = User::factory()->create();
+        $user->assignRole('customer');
+        $shop = Shop::create([
+            'user_id' => $user->id,
+            'name' => 'Stock Shop',
+            'slug' => 'stock-shop-'.uniqid(),
+            'status' => 'approved',
+            'commission_rate' => 10,
+        ]);
+        $category = Category::create([
+            'name' => 'Stock Category',
+            'slug' => 'stock-category-'.uniqid(),
+        ]);
+        $product = Product::create([
+            'shop_id' => $shop->id,
+            'category_id' => $category->id,
+            'name' => 'Limited Stock Product',
+            'slug' => 'limited-stock-'.uniqid(),
+            'description' => 'A product with limited variant stock',
+            'base_price' => 100,
+            'sku' => 'LIMITED-'.uniqid(),
+            'stock_quantity' => 10,
+            'status' => 'published',
+            'is_approved' => true,
+            'condition' => 'new',
+            'authenticity_status' => 'verified',
+            'verification_status' => 'verified',
+            'currency' => 'PHP',
+        ]);
+        $variant = ProductVariant::create([
+            'product_id' => $product->id,
+            'name' => 'Green / Small',
+            'sku' => 'GREEN-S-'.uniqid(),
+            'price' => 100,
+            'stock_quantity' => 5,
+            'is_active' => true,
+        ]);
+        $cart = Cart::create(['user_id' => $user->id]);
+        $item = CartItem::create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'variant_id' => $variant->id,
+            'quantity' => 1,
+            'price_snapshot' => 100,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->patchJson("/api/customer/cart/items/{$item->id}", ['quantity' => 6])
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'The requested quantity exceeds available stock.');
+
+        $this->assertSame(1, $item->fresh()->quantity);
+
+        $this->actingAs($user, 'sanctum')
+            ->patchJson("/api/customer/cart/items/{$item->id}", ['quantity' => 5])
+            ->assertOk()
+            ->assertJsonPath('quantity', 5);
     }
 }

@@ -28,9 +28,11 @@ type OrderItem = {
     unit_price: string | number;
     total_price: string | number;
     fulfillment_status?: string;
+    updated_at?: string;
     review?: { rating: number } | null;
     product?: {
         id?: number;
+        uuid?: string;
         name?: string;
         images?: { path: string; is_primary?: boolean }[];
         color?: string | null;
@@ -83,9 +85,9 @@ function OrderItemProductCard({ item }: { item: OrderItem }) {
                     <p className="tracking-product-variant">{variant}</p>
                     <p className="tracking-product-meta"><strong>{formatMoney(item.unit_price)}</strong> · Qty: {item.quantity}</p>
                     <div className="tracking-product-actions">
-                    {item.product?.id && (
+                    {item.product?.uuid && (
                         <Link
-                            href={`/products/${item.product.id}`}
+                            href={route('products.show', item.product.uuid)}
                             className="tracking-outline-button"
                         >
                             View product <ArrowRight size={13} />
@@ -140,6 +142,16 @@ type CustomerOrder = {
     created_at: string;
     total?: string | number;
     items?: OrderItem[];
+    delivery_tracking?: {
+        status: string;
+        assigned_at?: string | null;
+        started_at?: string | null;
+        arrived_at?: string | null;
+        submitted_at?: string | null;
+        confirmed_at?: string | null;
+        proof_url?: string | null;
+        rider?: { name: string; phone?: string | null } | null;
+    } | null;
 };
 
 type OrdersResponse = { data?: CustomerOrder[] };
@@ -151,6 +163,7 @@ type TimelineStage = {
     state: TimelineState;
     note: string;
     timestamp?: string;
+    datetime?: string;
 };
 
 const stageTitles = ['Order Confirmed', 'Processing', 'Shipped', 'Out for Delivery', 'Delivered'];
@@ -186,13 +199,37 @@ function statusLabel(status?: string) {
     if (normalized === 'shipped') return 'In Transit';
     if (normalized === 'out for delivery') return 'Out for Delivery';
     if (normalized === 'completed') return 'Delivered';
+    if (normalized === 'ready') return 'Rider Assigned';
+    if (normalized === 'in transit') return 'Out for Delivery';
+    if (normalized === 'arrived') return 'Arrived';
+    if (normalized === 'delivered') return 'Awaiting Confirmation';
+    if (normalized === 'awaiting confirmation') return 'Awaiting Confirmation';
+    if (normalized === 'failed') return 'Delivery Failed';
     return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function activeStageIndex(status?: string) {
+function trackingStatus(order: CustomerOrder) {
+    if (normalizedStatus(order.status) === 'cancelled') return 'cancelled';
+
+    const deliveryStatus = normalizedStatus(order.delivery_tracking?.status);
+    if (deliveryStatus === 'ready' || deliveryStatus === 'in transit' || deliveryStatus === 'arrived' || deliveryStatus === 'failed') {
+        return deliveryStatus;
+    }
+    if (deliveryStatus === 'delivered') return 'awaiting confirmation';
+    if (deliveryStatus === 'completed') return 'completed';
+
+    const itemStatuses = order.items?.map((item) => normalizedStatus(item.fulfillment_status)) ?? [];
+    if (itemStatuses.length > 0 && itemStatuses.every((status) => status === 'shipped' || status === 'delivered')) {
+        return 'shipped';
+    }
+
+    return normalizedStatus(order.status);
+}
+
+function activeStageIndex(status: string) {
     const normalized = normalizedStatus(status);
-    if (normalized === 'delivered' || normalized === 'completed') return 4;
-    if (normalized === 'out for delivery') return 3;
+    if (normalized === 'completed' || normalized === 'awaiting confirmation' || normalized === 'delivered') return 4;
+    if (normalized === 'ready' || normalized === 'in transit' || normalized === 'arrived' || normalized === 'failed' || normalized === 'out for delivery') return 3;
     if (normalized === 'shipped') return 2;
     if (normalized === 'processing' || normalized === 'accepted') return 1;
     if (normalized === 'pending') return 0;
@@ -200,16 +237,31 @@ function activeStageIndex(status?: string) {
 }
 
 function buildTimeline(order: CustomerOrder): TimelineStage[] {
-    const activeIndex = activeStageIndex(order.status);
-    const delivered = activeIndex === 4;
+    const status = trackingStatus(order);
+    const activeIndex = activeStageIndex(status);
+    const delivery = order.delivery_tracking;
+    const completed = status === 'completed' || (status === 'delivered' && !delivery);
+    const shippedTimes = order.items
+        ?.filter((item) => ['shipped', 'delivered'].includes(normalizedStatus(item.fulfillment_status)))
+        .map((item) => item.updated_at)
+        .filter((value): value is string => Boolean(value))
+        .sort() ?? [];
+    const shippedAt = shippedTimes[shippedTimes.length - 1] ?? null;
+    const stageTimes = [
+        order.created_at,
+        null,
+        shippedAt,
+        delivery?.arrived_at ?? delivery?.started_at ?? null,
+        delivery?.confirmed_at ?? delivery?.submitted_at ?? null,
+    ];
 
     return stageTitles.map((title, index) => {
-        const state: TimelineState = index < activeIndex || (delivered && index === activeIndex)
+        const state: TimelineState = index < activeIndex || (completed && index === activeIndex)
             ? 'completed'
             : index === activeIndex
               ? 'current'
               : 'pending';
-        const detail = index === 0
+        let detail = index === 0
             ? 'Your order has been placed.'
             : state === 'completed'
               ? 'This order stage has been completed.'
@@ -217,19 +269,39 @@ function buildTimeline(order: CustomerOrder): TimelineStage[] {
                 ? 'Current status reported by the seller.'
                 : 'This step has not been confirmed yet.';
 
+        if (index === 1 && state !== 'pending') detail = 'The seller has confirmed and prepared your order.';
+        if (index === 2 && state !== 'pending') detail = 'The seller has shipped the items in this order.';
+        if (index === 3 && delivery?.status === 'ready') detail = 'A logistics partner has been assigned to your order.';
+        if (index === 3 && delivery?.status === 'in_transit') detail = 'Your rider is on the way to the delivery address.';
+        if (index === 3 && delivery?.status === 'arrived') detail = 'Your rider has arrived at the delivery address.';
+        if (index === 3 && delivery?.status === 'failed') detail = 'The delivery could not be completed. Please contact support for help.';
+        if (index === 4 && delivery?.status === 'delivered') detail = 'The delivery photo was submitted. Please confirm receipt to complete your order.';
+        if (index === 4 && delivery?.status === 'completed') detail = 'You confirmed receipt of this order.';
+
         return {
             title,
             detail,
             state,
-            note: state === 'current' ? 'In Progress' : state === 'completed' ? 'Completed' : 'Pending',
-            ...(index === 0 ? { timestamp: formatDateTime(order.created_at) } : {}),
+            note: status === 'failed' && index === 3
+                ? 'Needs Attention'
+                : status === 'awaiting confirmation' && index === 4
+                  ? 'Confirm Receipt'
+                  : state === 'current'
+                    ? 'In Progress'
+                    : state === 'completed'
+                      ? 'Completed'
+                      : 'Pending',
+            ...(stageTimes[index] ? {
+                timestamp: formatDateTime(stageTimes[index]!),
+                datetime: stageTimes[index]!,
+            } : {}),
         };
     });
 }
 
 function Timeline({ order }: { order: CustomerOrder }) {
     const timeline = buildTimeline(order);
-    const cancelled = normalizedStatus(order.status) === 'cancelled';
+    const cancelled = trackingStatus(order) === 'cancelled';
 
     return (
         <div className="tracking-timeline">
@@ -252,11 +324,27 @@ function Timeline({ order }: { order: CustomerOrder }) {
                                 <span>{cancelled ? 'Not completed' : stage.note}</span>
                             </div>
                             <p>{stage.detail}</p>
-                            {stage.timestamp && <time dateTime={order.created_at}>{stage.timestamp}</time>}
+                            {stage.timestamp && <time dateTime={stage.datetime}>{stage.timestamp}</time>}
                         </div>
                     </li>
                 ))}
             </ol>
+            {order.delivery_tracking?.proof_url && (
+                <figure className="mt-4 rounded-2xl border border-[#dcefe5] bg-[#f8fcf9] p-4">
+                    <figcaption className="mb-3 text-sm font-bold text-[#145b52]">Delivery photo</figcaption>
+                    <img
+                        src={order.delivery_tracking.proof_url}
+                        alt="Photo proof of delivery"
+                        className="max-h-80 w-full rounded-xl object-contain"
+                    />
+                    {order.delivery_tracking.rider && (
+                        <p className="mt-3 text-sm text-[#52766d]">
+                            Delivered by {order.delivery_tracking.rider.name}
+                            {order.delivery_tracking.rider.phone ? ` · ${order.delivery_tracking.rider.phone}` : ''}
+                        </p>
+                    )}
+                </figure>
+            )}
         </div>
     );
 }
@@ -360,7 +448,8 @@ function OrderTrackingQrCard({ order }: { order: CustomerOrder }) {
 }
 
 function OrderSummary({ order }: { order: CustomerOrder }) {
-    const normalized = normalizedStatus(order.status);
+    const status = trackingStatus(order);
+    const normalized = normalizedStatus(status);
 
     return (
         <section className="tracking-panel">
@@ -673,7 +762,11 @@ export default function CustomerOrderTracking() {
                                             <span className="tracking-icon-bubble"><Truck size={21} /></span>
                                             <div>
                                                 <h2>Delivery updates</h2>
-                                                <p>Order progress reported by the seller</p>
+                                                <p>
+                                                    {order.delivery_tracking?.rider
+                                                        ? `Seller and rider updates · ${order.delivery_tracking.rider.name}`
+                                                        : 'Progress reported by the seller and delivery partner'}
+                                                </p>
                                             </div>
                                         </div>
                                         <div className="tracking-order-head">
@@ -682,8 +775,8 @@ export default function CustomerOrderTracking() {
                                                 <p className="tracking-order-number">{order.order_number}</p>
                                                 <p className="tracking-order-date">Placed on {formatDate(order.created_at)}</p>
                                             </div>
-                                            <span className={`tracking-status tracking-status-${normalizedStatus(order.status).replace(/\s+/g, '-')}`}>
-                                                <Truck size={16} /> {statusLabel(order.status)}
+                                            <span className={`tracking-status tracking-status-${normalizedStatus(trackingStatus(order)).replace(/\s+/g, '-')}`}>
+                                                <Truck size={16} /> {statusLabel(trackingStatus(order))}
                                             </span>
                                         </div>
                                         <Timeline order={order} />
@@ -723,7 +816,7 @@ export default function CustomerOrderTracking() {
                                         <p className="tracking-muted">Delivery timing depends on your location and delivery partner.</p>
                                     </section>
                                     <TrackingReferenceCard order={order} />
-                                    <OrderStatusMessage status={order.status} />
+                                    <OrderStatusMessage status={trackingStatus(order)} />
                                     <div className="tracking-summary-panel"><OrderSummary order={order} /></div>
                                 </aside>
                             </div>

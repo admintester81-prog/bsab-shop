@@ -104,15 +104,24 @@ class AdminOrderController extends Controller
         ]);
 
         DB::transaction(function () use ($order, $data) {
-            $order->update(['status' => $data['status']]);
-            $order->items()->update([
+            $lockedOrder = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $delivery = $lockedOrder->delivery()->lockForUpdate()->first();
+            if ($data['status'] === 'delivered') {
+                abort_unless($delivery?->status === 'completed', 422, 'Customer confirmation is required before completing this order.');
+            }
+            if ($delivery && in_array($delivery->status, ['ready', 'in_transit', 'arrived', 'delivered', 'completed'], true)) {
+                abort_unless($data['status'] === $lockedOrder->status, 422, 'An active delivery cannot be moved to another order status.');
+            }
+
+            $lockedOrder->update(['status' => $data['status']]);
+            $lockedOrder->items()->update([
                 'fulfillment_status' => $data['status'] === 'pending'
                     ? 'processing'
                     : $data['status'],
             ]);
 
             if ($data['status'] === 'cancelled') {
-                app(VoucherService::class)->releaseUsageForCancelledOrder($order);
+                app(VoucherService::class)->releaseUsageForCancelledOrder($lockedOrder);
             }
         });
 

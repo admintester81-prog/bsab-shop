@@ -37,6 +37,10 @@ class AuthenticatedSessionController extends Controller
             return redirect()->route('marketplace');
         }
 
+        if ($request->user()->hasRole('rider')) {
+            return redirect()->intended(route('delivery-list', absolute: false));
+        }
+
         return redirect()->intended(route('dashboard', absolute: false));
     }
 

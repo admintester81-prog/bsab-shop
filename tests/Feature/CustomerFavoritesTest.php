@@ -59,7 +59,7 @@ class CustomerFavoritesTest extends TestCase
         $favoritesResponse->assertOk()->assertSee('Favorites test product');
 
         $productResponse = $this->actingAs($customer)
-            ->get(route('products.show', $product));
+            ->get(route('products.show', $product->uuid));
 
         $productResponse->assertOk();
 

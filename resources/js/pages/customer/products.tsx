@@ -9,6 +9,7 @@ import ProductCard from '../../components/ProductCard';
 type Category = { id: number; name: string; slug: string };
 type Product = {
     id: number;
+    uuid: string;
     name: string;
     description?: string | null;
     base_price: string;
@@ -148,7 +149,7 @@ export default function CustomerProducts({
                                     product={product}
                                     liked={liked}
                                     onToggleFavorite={() => toggleFavorite(product.id)}
-                                    onOpenProduct={() => router.visit(route('products.show', product.id))}
+                                    onOpenProduct={() => router.visit(route('products.show', product.uuid))}
                                 />
                             );
                         })
