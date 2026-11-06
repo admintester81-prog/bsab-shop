@@ -1,6 +1,6 @@
 import { PortalLayout } from '@/components/portal-layout';
 import { Head } from '@inertiajs/react';
-import { ArrowRightLeft, Banknote, CheckCircle2, CreditCard, Download, Wallet } from 'lucide-react';
+import { ArrowRightLeft, Banknote, CheckCircle2, CreditCard, Wallet } from 'lucide-react';
 
 type SellerPaymentsProps = {
     stats?: Array<{ label: string; value: number | string; detail: string; tone: 'green' | 'mint' | 'dark' | 'light' }>;
@@ -49,9 +49,6 @@ export default function SellerPayments({ stats = defaultStats, payouts = default
                                 <p className="text-[10px] font-bold tracking-[0.16em] text-[#2f9d5b] uppercase">Payment history</p>
                                 <h2 className="mt-2 text-2xl font-bold text-[#163b24]">Payout history</h2>
                             </div>
-                            <button className="inline-flex items-center gap-2 rounded-xl bg-[#1f7a42] px-3 py-2 text-xs font-semibold text-white">
-                                <Download size={14} /> Withdraw
-                            </button>
                         </div>
                         <div className="overflow-hidden rounded-xl border border-[#edf3ee]">
                             <table className="w-full text-left text-sm">

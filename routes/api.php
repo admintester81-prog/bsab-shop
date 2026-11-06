@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\AdminSellerController;
 use App\Http\Controllers\Api\CheckoutController;
 use App\Http\Controllers\Api\CustomerCartController;
 use App\Http\Controllers\Api\CustomerLocationGeocodingController;
+use App\Http\Controllers\Api\CustomerOrderController;
+use App\Http\Controllers\Api\ProductSearchController;
 use App\Http\Controllers\Api\CustomerProductReviewController;
 use App\Http\Controllers\Api\CustomerVoucherController;
 use App\Http\Controllers\Api\ProductController;
@@ -18,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 Route::get('products', [ProductController::class, 'index']);
+Route::get('products/search', [ProductSearchController::class, 'search'])->middleware('throttle:120,1');
 Route::get('products/{product}', [ProductController::class, 'show']);
 Route::get('support/assistant/status', [SupportConversationController::class, 'assistantStatus'])->middleware('throttle:30,1');
 Route::post('support/assistant', [SupportConversationController::class, 'guestAssistant'])->middleware('throttle:10,1');
@@ -26,6 +29,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('user', fn (Request $request) => $request->user()->load('roles', 'shop', 'addresses'));
     Route::get('support/conversation', [SupportConversationController::class, 'show']);
     Route::post('support/conversation/messages', [SupportConversationController::class, 'store'])->middleware('throttle:5,1');
+    Route::middleware('role:customer|seller')->prefix('customer/location')->group(function () {
+        Route::get('search', [CustomerLocationGeocodingController::class, 'search'])->middleware('throttle:60,1');
+        Route::get('reverse', [CustomerLocationGeocodingController::class, 'reverse'])->middleware('throttle:60,1');
+    });
 
     Route::middleware('role:admin')->prefix('admin')->group(function () {
         Route::get('orders', [AdminOrderController::class, 'index']);
@@ -72,8 +79,9 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('role:customer')->prefix('customer')->group(function () {
-        Route::get('location/search', [CustomerLocationGeocodingController::class, 'search'])->middleware('throttle:60,1');
-        Route::get('location/reverse', [CustomerLocationGeocodingController::class, 'reverse'])->middleware('throttle:60,1');
+        Route::get('search-history', [ProductSearchController::class, 'history']);
+        Route::post('search-history', [ProductSearchController::class, 'storeHistory'])->middleware('throttle:30,1');
+        Route::delete('search-history', [ProductSearchController::class, 'clearHistory']);
         Route::get('cart', [CustomerCartController::class, 'show']);
         Route::post('cart/items', [CustomerCartController::class, 'store']);
         Route::patch('cart/items/{item}', [CustomerCartController::class, 'update']);
@@ -84,48 +92,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('cart/voucher', [CustomerVoucherController::class, 'remove']);
         Route::post('vouchers/{voucher}/claim', [CustomerVoucherController::class, 'claim']);
         Route::post('checkout', [CheckoutController::class, 'store']);
-        Route::get('orders', fn (Request $request) => $request->user()->orders()
-            ->with('items.product.images', 'items.shop', 'items.variant', 'items.review', 'delivery.rider:id,name,phone')
-            ->latest()
-            ->paginate(20)
-            ->through(function (Order $order) {
-                $delivery = $order->delivery;
-                $order->setAttribute('delivery_tracking', $delivery ? [
-                    'status' => $delivery->status,
-                    'assigned_at' => $delivery->assigned_at?->toIso8601String(),
-                    'started_at' => $delivery->started_at?->toIso8601String(),
-                    'arrived_at' => $delivery->arrived_at?->toIso8601String(),
-                    'submitted_at' => $delivery->submitted_at?->toIso8601String(),
-                    'confirmed_at' => $delivery->confirmed_at?->toIso8601String(),
-                    'proof_url' => $delivery->proof_path ? route('delivery-list.proof', $delivery) : null,
-                    'rider' => $delivery->rider ? [
-                        'name' => $delivery->rider->name,
-                        'phone' => $delivery->rider->phone,
-                    ] : null,
-                ] : null);
-
-                return $order->makeHidden('delivery');
-            }));
-        Route::get('orders/{order}', function (Request $request, Order $order) {
-            abort_unless($order->user_id === $request->user()->id, 403);
-            $order->load('items.product.images', 'items.shop', 'items.variant', 'items.review', 'payments', 'delivery.rider:id,name,phone');
-            $delivery = $order->delivery;
-            $order->setAttribute('delivery_tracking', $delivery ? [
-                'status' => $delivery->status,
-                'assigned_at' => $delivery->assigned_at?->toIso8601String(),
-                'started_at' => $delivery->started_at?->toIso8601String(),
-                'arrived_at' => $delivery->arrived_at?->toIso8601String(),
-                'submitted_at' => $delivery->submitted_at?->toIso8601String(),
-                'confirmed_at' => $delivery->confirmed_at?->toIso8601String(),
-                'proof_url' => $delivery->proof_path ? route('delivery-list.proof', $delivery) : null,
-                'rider' => $delivery->rider ? [
-                    'name' => $delivery->rider->name,
-                    'phone' => $delivery->rider->phone,
-                ] : null,
-            ] : null);
-
-            return $order->makeHidden('delivery');
-        });
+        Route::get('orders', [CustomerOrderController::class, 'index']);
+        Route::get('orders/{order}', [CustomerOrderController::class, 'show']);
         Route::post('order-items/{item}/review', [CustomerProductReviewController::class, 'store']);
     });
 });

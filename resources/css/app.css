@@ -81,6 +81,17 @@ html:has(.marketplace-page)::-webkit-scrollbar {
     body:has(.mobile-product-detail)::-webkit-scrollbar {
         display: none;
     }
+
+    html:has(.customer-profile-page),
+    body:has(.customer-profile-page) {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+
+    html:has(.customer-profile-page)::-webkit-scrollbar,
+    body:has(.customer-profile-page)::-webkit-scrollbar {
+        display: none;
+    }
 }
 
 /*

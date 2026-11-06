@@ -17,7 +17,10 @@ type AddressForm = {
     city: string;
     province: string;
     postal_code: string;
+    latitude: number | null;
+    longitude: number | null;
 };
+type AddressField = Exclude<keyof AddressForm, 'latitude' | 'longitude'>;
 type SavedAddress = AddressForm & { id?: number; is_default?: boolean };
 type CartItem = {
     id: number;
@@ -75,6 +78,8 @@ const emptyAddress: AddressForm = {
     city: 'Hinoba-an',
     province: 'Negros Occidental',
     postal_code: '',
+    latitude: null,
+    longitude: null,
 };
 const stepLabels = ['Cart', 'Shipping', 'Payment', 'Review'];
 
@@ -500,7 +505,7 @@ export default function CustomerCheckout() {
         const zone = deliveryZones.find((deliveryZone) => String(deliveryZone.id) === value);
         if (!zone?.barangay) return;
 
-        setAddress((current) => ({ ...current, barangay: zone.barangay || '' }));
+        setAddress((current) => ({ ...current, barangay: zone.barangay || '', latitude: null, longitude: null }));
         if (deliveryOption === 'pickup') {
             const deliveryMethod = (['local_delivery', 'seller_delivery'] as const).find((option) => deliveryOptions[option]);
             if (deliveryMethod) setDeliveryOption(deliveryMethod);
@@ -735,7 +740,7 @@ export default function CustomerCheckout() {
         }
 
         if (desktopStep === 'shipping') {
-            const addressFields: { key: keyof AddressForm; label: string; optional?: boolean }[] = [
+            const addressFields: { key: AddressField; label: string; optional?: boolean }[] = [
                 { key: 'full_name', label: 'Recipient name' },
                 { key: 'phone', label: 'Phone number' },
                 { key: 'house_number', label: 'House / building number', optional: true },
@@ -798,7 +803,13 @@ export default function CustomerCheckout() {
                                             {label}{optional ? ' (optional)' : ''}
                                             <input
                                                 value={address[key]}
-                                                onChange={(event) => setAddress((current) => ({ ...current, [key]: event.target.value }))}
+                                                onChange={(event) => setAddress((current) => ({
+                                                    ...current,
+                                                    [key]: event.target.value,
+                                                    ...(key === 'line1' || key === 'house_number'
+                                                        ? { latitude: null, longitude: null }
+                                                        : {}),
+                                                }))}
                                                 className={inputClass}
                                                 required={!optional}
                                                 autoComplete={key === 'full_name' ? 'name' : key === 'phone' ? 'tel' : key === 'line1' ? 'address-line1' : 'off'}
@@ -810,7 +821,12 @@ export default function CustomerCheckout() {
                                         <input
                                             list="checkout-delivery-zones"
                                             value={address.barangay}
-                                            onChange={(event) => setAddress((current) => ({ ...current, barangay: event.target.value }))}
+                                            onChange={(event) => setAddress((current) => ({
+                                                ...current,
+                                                barangay: event.target.value,
+                                                latitude: null,
+                                                longitude: null,
+                                            }))}
                                             className={inputClass}
                                             placeholder="Enter your barangay or neighborhood"
                                             autoComplete="address-level3"

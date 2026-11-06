@@ -15,6 +15,12 @@ interface SelectedLocation {
     lng: number;
 }
 
+interface GeocodingResult {
+    lat: string;
+    lon: string;
+    display_name: string;
+}
+
 interface MapPickerModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -95,7 +101,7 @@ function normalizeBarangay(value: string) {
 }
 
 function getBarangay(address: Record<string, string | undefined>) {
-    return address.barangay || address.suburb || address.neighbourhood || address.quarter || address.city_district || address.hamlet || '';
+    return address.barangay || address.quarter || address.suburb || address.neighbourhood || address.city_district || address.hamlet || '';
 }
 
 export default function MapPickerModal({ isOpen, onClose, initialAddress, deliveryBarangays, onSelectLocation }: MapPickerModalProps) {
@@ -109,7 +115,7 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
     const [isSearching, setIsSearching] = useState(false);
     const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
     const [lookupError, setLookupError] = useState('');
-    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [searchResults, setSearchResults] = useState<GeocodingResult[]>([]);
     const [isSupportedLocation, setIsSupportedLocation] = useState(false);
     const [isSupportedBarangay, setIsSupportedBarangay] = useState(false);
     const [selectedLocation, setSelectedLocation] = useState<SelectedLocation>({
@@ -140,7 +146,7 @@ export default function MapPickerModal({ isOpen, onClose, initialAddress, delive
 
             const streetNumber = addr.house_number || '';
             const road = addr.road || addr.street || addr.pedestrian || addr.suburb || addr.neighbourhood || '';
-            const line1 = [streetNumber, road].filter(Boolean).join(' ') || data.name || '';
+            const line1 = addr.amenity || addr.building || [streetNumber, road].filter(Boolean).join(' ') || data.name || '';
             const city = addr.city || addr.town || addr.municipality || addr.village || addr.county || '';
             const province = addr.province || addr.state || addr.region || '';
             const postal_code = addr.postcode || '';

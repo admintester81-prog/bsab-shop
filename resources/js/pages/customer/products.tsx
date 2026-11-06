@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react';
 
 import '../../../css/design.css';
 import ProductCard from '../../components/ProductCard';
+import { api } from '@/lib/api';
+import ProductSearchExperience, { ProductSearchAutocomplete } from '@/components/product-search-experience';
 
 /* ─── Types ─────────────────────────────────────────────── */
 type Category = { id: number; name: string; slug: string };
@@ -43,6 +45,7 @@ export default function CustomerProducts({
     const [sortBy, setSortBy] = useState<'latest' | 'price-asc' | 'price-desc' | 'rating'>('latest');
     const [inStockOnly, setInStockOnly] = useState(false);
     const [filterOpen, setFilterOpen] = useState(false);
+    const [searchFocused, setSearchFocused] = useState(false);
 
     function toggleFavorite(productId: number) {
         if (!auth?.user) {
@@ -70,6 +73,36 @@ export default function CustomerProducts({
     }, [products, search, category, sortBy, inStockOnly]);
 
     const hasActiveFilters = sortBy !== 'latest' || inStockOnly || category !== 'all';
+    const hasSmartSearch = search.trim().length >= 2;
+
+    function saveSearch(term: string) {
+        if (term.trim().length < 2) return;
+        if (auth?.user) {
+            void api.post('/customer/search-history', { query: term.trim() }).catch((error: unknown) => {
+                console.error('Could not save product search history.', error);
+            });
+            return;
+        }
+        try {
+            const previous = JSON.parse(window.localStorage.getItem('bsabshop-search-history') || '[]');
+            const history = Array.isArray(previous) ? previous.filter((item): item is string => typeof item === 'string') : [];
+            window.localStorage.setItem('bsabshop-search-history', JSON.stringify([term.trim(), ...history.filter((item) => item.toLowerCase() !== term.trim().toLowerCase())].slice(0, 8)));
+        } catch (error) {
+            console.error('Could not save local product search history.', error);
+        }
+    }
+
+    function submitSearch(event: React.FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        saveSearch(search);
+        setSearchFocused(false);
+    }
+
+    function selectSearchTerm(term: string) {
+        setSearch(term);
+        saveSearch(term);
+        setSearchFocused(false);
+    }
 
     return (
         <>
@@ -82,11 +115,20 @@ export default function CustomerProducts({
                         <ChevronLeft size={20} />
                     </a>
 
-                    <div className="search-pill">
-                        <Search size={16} />
+                    <form
+                        onSubmit={submitSearch}
+                        onBlur={(event) => {
+                            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                                window.setTimeout(() => setSearchFocused(false), 120);
+                            }
+                        }}
+                        className="search-pill relative"
+                    >
+                        <button type="submit" className="shrink-0 text-[#647568]" aria-label="Search products"><Search size={16} /></button>
                         <input
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
+                            onFocus={() => setSearchFocused(true)}
                             placeholder="Search products, vendors…"
                             aria-label="Search products"
                         />
@@ -108,7 +150,13 @@ export default function CustomerProducts({
                                 <span className="absolute top-0 right-0 h-2 w-2 rounded-full bg-[#1f7a42] ring-2 ring-white" />
                             )}
                         </button>
-                    </div>
+                        <ProductSearchAutocomplete
+                            query={search}
+                            open={searchFocused && search.trim().length < 2}
+                            authenticated={Boolean(auth?.user)}
+                            onSelect={selectSearchTerm}
+                        />
+                    </form>
 
                     <Link href="/customer/cart" className="relative icon-btn accent" aria-label={`Cart, ${cartCount} items`}>
                         <ShoppingCart size={20} />
@@ -119,15 +167,22 @@ export default function CustomerProducts({
                 </div>
 
                 {/* ── Title row ───────────────────────────── */}
-                <div className="title-row">
+                {!hasSmartSearch && <div className="title-row">
                     <div className="title-group">
                         <h1>Fresh Arrivals</h1>
                         <span className="count-badge">{filteredProducts.length}</span>
                     </div>
-                </div>
+                </div>}
+
+                <ProductSearchExperience
+                    query={search}
+                    categories={categories}
+                    authenticated={Boolean(auth?.user)}
+                    onCommitSearch={setSearch}
+                />
 
                 {/* ── Category chips ──────────────────────── */}
-                <div className="chip-row">
+                {!hasSmartSearch && <div className="chip-row">
                     <button className={`chip${category === 'all' ? 'active' : ''}`} onClick={() => setCategory('all')}>
                         All
                     </button>
@@ -136,10 +191,10 @@ export default function CustomerProducts({
                             {cat.name}
                         </button>
                     ))}
-                </div>
+                </div>}
 
                 {/* ── Product grid ────────────────────────── */}
-                <div className="product-grid">
+                {!hasSmartSearch && <div className="product-grid">
                     {filteredProducts.length > 0 ? (
                         filteredProducts.map((product) => {
                             const liked = favorites.includes(product.id);
@@ -156,7 +211,7 @@ export default function CustomerProducts({
                     ) : (
                         <div className="empty-state">No products match your search.</div>
                     )}
-                </div>
+                </div>}
             </div>
 
             {/* ── Bottom nav (mobile/tablet only) ────────── */}

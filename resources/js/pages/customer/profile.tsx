@@ -6,6 +6,7 @@ import { type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
 import {
     Check,
+    CalendarDays,
     ChevronDown,
     ChevronRight,
     CircleHelp,
@@ -254,7 +255,7 @@ export default function CustomerProfile() {
     return (
         <>
             <Head title="Your profile - bsabshop" />
-            <div className="min-h-screen bg-[#f7fbf7] text-[#173b2a] antialiased">
+            <div className="customer-profile-page min-h-screen bg-[#f7fbf7] text-[#173b2a] antialiased">
                 {/* ── Click-outside overlay for dropdowns ── */}
                 {accountMenuOpen && (
                     <div
@@ -267,7 +268,7 @@ export default function CustomerProfile() {
                 )}
 
                 {/* ── Top Header ── */}
-                <header className="relative z-30 border-b border-[#e5eee7] bg-white">
+                <header className="relative z-30 hidden border-b border-[#e5eee7] bg-white md:block">
                     <div className="mx-auto hidden h-[70px] w-full max-w-7xl items-center gap-4 px-4 sm:px-6 lg:flex lg:px-8">
                         {/* ── Brand ── */}
                         <Link href="/" className="flex shrink-0 items-center gap-2" aria-label={`${brandName} home`}>
@@ -429,41 +430,39 @@ export default function CustomerProfile() {
                     </section>
 
                     {/* ── Mobile Profile Banner ── */}
-                    <section className="relative overflow-hidden rounded-2xl border border-[#e1ebdf] bg-[#eef6e8] p-4 shadow-[0_6px_20px_rgba(22,59,36,0.06)] md:hidden">
+                    <section className="relative overflow-hidden rounded-2xl border border-[#d6f0dc] bg-[#ddf5e3] p-4 shadow-[0_6px_20px_rgba(22,59,36,0.06)] md:hidden">
                         <div className="relative flex items-center gap-3.5">
                             <Avatar src={avatarSource} name={user?.name ?? 'Customer'} size="medium" />
                             <div className="min-w-0 flex-1">
                                 <span className="inline-flex items-center gap-1 rounded-full bg-[#e2f2e4] px-2.5 py-0.5 text-[9px] font-bold tracking-[.08em] text-[#2c8050] uppercase">
-                                    <Check size={10} strokeWidth={3} /> Verified
+                                    <Check size={10} strokeWidth={3} /> Verified Customer
                                 </span>
                                 <h1 className="font-display mt-1 truncate text-lg font-bold text-[#145437]">{user?.name}</h1>
                                 <p className="truncate text-xs text-[#5d7768]">{user?.email}</p>
                             </div>
                             <button
                                 type="button"
-                                onClick={editProfile}
-                                aria-label="Edit profile"
-                                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white text-[#1f7a42] shadow-sm transition hover:bg-[#f5fcf7] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2c9350]"
+                                onClick={() => router.visit(route('customer.settings'))}
+                                aria-label="Settings"
+                                className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-white text-[#168b43] shadow-sm transition hover:bg-[#f5fcf7] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2c9350]"
                             >
-                                <Pencil size={16} />
+                                <Settings size={21} />
                             </button>
                         </div>
                     </section>
 
                     {/* ── Customer Statistics ── */}
-                    <section aria-label="Customer statistics" className="mt-4 grid grid-cols-3 gap-2.5 sm:gap-3 md:grid-cols-4">
+                    <section aria-label="Customer statistics" className="mt-4 grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-4">
                         <Stat icon={Package} value="12" label="Total Orders" compactLabel="Orders" />
-                        <Stat icon={CircleDollar} value="₱8,450" label="Total Spent" compactLabel="Total Spent" />
-                        <Stat icon={TicketPercent} value="3" label="Vouchers" compactLabel="Vouchers" />
-                        <div className="hidden md:block">
-                            <Stat icon={Star} value="4.8" label="Customer Rating" />
-                        </div>
+                        <Stat icon={CircleDollar} value="₱8,450" mobileValue="₱6,450" label="Total Spent" compactLabel="Total Spent" />
+                        <Stat icon={TicketPercent} value="3" mobileValue="5" label="Vouchers" compactLabel="Vouchers" />
+                        <Stat icon={Star} value="4.8" label="Customer Rating" />
                     </section>
 
                     {/* ── Main Profile Grid ── */}
                     <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1.75fr)_minmax(280px,0.85fr)] lg:gap-5">
                         <section className="overflow-hidden rounded-2xl border border-[#e3eee6] bg-white shadow-[0_4px_16px_rgba(38,104,63,0.04)]">
-                            <div role="tablist" aria-label="Profile sections" className="flex overflow-x-auto border-b border-[#e5eee7] px-3 sm:px-5">
+                            <div role="tablist" aria-label="Profile sections" className="scrollbar-none flex overflow-x-auto border-b border-[#e5eee7] px-3 sm:px-5 [&::-webkit-scrollbar]:hidden">
                                 {tabs.map((tab) => (
                                     <button
                                         key={tab}
@@ -492,7 +491,10 @@ export default function CustomerProfile() {
                                 {activeTab === 'Personal Information' && (
                                     <form onSubmit={submit}>
                                         <div className="mb-5 flex items-center justify-between gap-3">
-                                            <h2 className="font-display text-base font-bold text-[#145437]">Personal Information</h2>
+                                            <h2 className="font-display flex items-center gap-2 text-base font-bold text-[#145437]">
+                                                <UserRound size={18} className="hidden text-[#168b43] max-md:block" />
+                                                Personal Information
+                                            </h2>
                                             {isEditing ? (
                                                 <button
                                                     type="button"
@@ -514,8 +516,8 @@ export default function CustomerProfile() {
                                                 </button>
                                             )}
                                         </div>
-                                        <div className="grid gap-5 md:grid-cols-[112px_minmax(0,1fr)]">
-                                            <div className="flex items-center gap-3 md:flex-col md:items-center">
+                                        <div className="grid gap-5 md:grid-cols-[112px_minmax(0,1fr)] max-md:grid-cols-1">
+                                            <div className="flex items-center gap-3 md:flex-col md:items-center max-md:flex-col max-md:items-start">
                                                 <Avatar src={avatarSource} name={user?.name ?? 'Customer'} size="profile" />
                                                 <div className="md:text-center">
                                                     <label
@@ -542,7 +544,7 @@ export default function CustomerProfile() {
                                                     </label>
                                                 </div>
                                             </div>
-                                            <div className="grid gap-x-4 gap-y-3.5 sm:grid-cols-2">
+                                            <div className="grid gap-x-4 gap-y-3.5 sm:grid-cols-2 max-md:grid-cols-1">
                                                 <ProfileField
                                                     label="Full Name"
                                                     value={data.name}
@@ -562,20 +564,29 @@ export default function CustomerProfile() {
                                         </div>
                                         <div className="mt-6 border-t border-[#e5eee7] pt-4">
                                             <h3 className="font-display text-sm font-bold text-[#145437]">Account Details</h3>
-                                            <div className="mt-3 grid gap-3 text-xs sm:grid-cols-3">
-                                                <div>
-                                                    <p className="text-[#5c6e63]">Member Since</p>
-                                                    <p className="mt-1 font-medium text-[#173b2a]">{memberSince}</p>
+                                            <div className="mt-3 grid gap-3 text-xs sm:grid-cols-3 max-md:grid-cols-1">
+                                                <div className="max-md:flex max-md:items-start max-md:gap-3">
+                                                    <CalendarDays size={18} className="hidden shrink-0 text-[#168b43] max-md:block" />
+                                                    <div>
+                                                        <p className="text-[#5c6e63]">Member Since</p>
+                                                        <p className="mt-1 font-medium text-[#173b2a]">{memberSince}</p>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <p className="text-[#5c6e63]">Account Type</p>
-                                                    <p className="mt-1 font-medium text-[#173b2a]">Customer</p>
+                                                <div className="max-md:flex max-md:items-start max-md:gap-3">
+                                                    <UserRound size={18} className="hidden shrink-0 text-[#168b43] max-md:block" />
+                                                    <div>
+                                                        <p className="text-[#5c6e63]">Account Type</p>
+                                                        <p className="mt-1 font-medium text-[#173b2a]">Customer</p>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <p className="text-[#5c6e63]">Verification Status</p>
-                                                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#e2f2e4] px-2.5 py-0.5 text-[10px] font-bold text-[#2c8050] uppercase">
-                                                        <Check size={11} strokeWidth={3} /> Verified
-                                                    </span>
+                                                <div className="max-md:flex max-md:items-start max-md:gap-3">
+                                                    <ShieldCheck size={18} className="hidden shrink-0 text-[#168b43] max-md:block" />
+                                                    <div>
+                                                        <p className="text-[#5c6e63]">Verification Status</p>
+                                                        <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#e2f2e4] px-2.5 py-0.5 text-[10px] font-bold text-[#2c8050] uppercase">
+                                                            <Check size={11} strokeWidth={3} /> Verified
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -963,6 +974,14 @@ export default function CustomerProfile() {
                                         )}
                                     </form>
                                 )}
+                                <Link
+                                    href={route('logout')}
+                                    method="post"
+                                    as="button"
+                                    className="mx-1.5 mt-2 flex min-h-14 w-[calc(100%-0.75rem)] items-center justify-center gap-2 rounded-[28px] border border-[#ccebd4] bg-[#ddf5e3] text-base font-bold text-[#168b43] transition hover:bg-[#d2efda] md:hidden"
+                                >
+                                    <LogOut size={20} /> Log Out
+                                </Link>
                             </div>
                         </section>
 
@@ -1028,15 +1047,6 @@ export default function CustomerProfile() {
 
 
 
-                    {/* ── Mobile Log Out Button ── */}
-                    <Link
-                        href={route('logout')}
-                        method="post"
-                        as="button"
-                        className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#f8d7da] bg-[#fdf0ed] text-xs font-bold text-[#d96c5a] transition hover:bg-[#fbe4df] md:hidden"
-                    >
-                        <LogOut size={16} /> Log Out
-                    </Link>
                 </main>
 
                 <CustomerBottomNav />
@@ -1109,27 +1119,40 @@ function Avatar({
 function Stat({
     icon: Icon,
     value,
+    mobileValue,
     label,
     compactLabel,
 }: {
     icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
     value: string;
+    mobileValue?: string;
     label: string;
     compactLabel?: string;
 }) {
     const isStar = Icon === Star;
     return (
-        <article className="flex min-h-14 items-center gap-3 rounded-2xl border border-[#e3eee6] bg-white px-3.5 py-3 shadow-[0_3px_12px_rgba(22,59,36,0.04)]">
+        <article className="relative flex min-h-24 min-w-0 items-center gap-2 rounded-2xl border border-[#e3eee6] bg-white px-3 py-3 pr-8 shadow-[0_3px_12px_rgba(22,59,36,0.06)] max-[360px]:gap-1 max-[360px]:px-2 max-[360px]:pr-6 md:min-h-14 md:gap-3 md:px-3.5 md:pr-3.5 md:shadow-[0_3px_12px_rgba(22,59,36,0.04)]">
             <span
-                className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${
-                    isStar ? 'bg-[#fef7ea] text-[#f3b33d]' : 'bg-[#e2f2e4] text-[#23834b]'
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full max-[360px]:h-8 max-[360px]:w-8 md:h-9 md:w-9 ${
+                    isStar
+                        ? 'bg-[#e2f2e4] text-[#23834b] md:bg-[#fef7ea] md:text-[#f3b33d]'
+                        : 'bg-[#e2f2e4] text-[#23834b]'
                 }`}
             >
                 <Icon size={18} strokeWidth={2.2} />
             </span>
-            <span className="min-w-0">
-                <strong className="font-display block truncate text-xs font-bold text-[#145437] md:text-sm">{value}</strong>
-                <span className="block truncate text-[10px] font-medium text-[#5c6e63]">
+            <span className="min-w-0 flex-1">
+                <strong className="font-display block whitespace-nowrap text-base font-bold text-[#145437] md:text-sm">
+                    {mobileValue ? (
+                        <>
+                            <span className="md:hidden">{mobileValue}</span>
+                            <span className="hidden md:inline">{value}</span>
+                        </>
+                    ) : (
+                        value
+                    )}
+                </strong>
+                <span className="block text-[10px] leading-tight font-medium text-[#5c6e63] md:whitespace-nowrap">
                     {compactLabel && (
                         <>
                             <span className="md:hidden">{compactLabel}</span>
@@ -1139,6 +1162,7 @@ function Stat({
                     {!compactLabel && label}
                 </span>
             </span>
+            <ChevronRight size={18} className="absolute right-2.5 text-[#173b2a] md:hidden" />
         </article>
     );
 }
@@ -1166,7 +1190,7 @@ function ProfileField({
                 value={value}
                 readOnly={!editable}
                 onChange={(event) => onChange(event.target.value)}
-                className={`mt-1.5 w-full rounded-xl border px-3.5 py-2.5 text-xs text-[#173b2a] outline-none transition placeholder:text-[#5c6e63] ${
+                className={`mt-1.5 w-full rounded-xl border px-3.5 py-2.5 text-xs text-[#173b2a] outline-none transition placeholder:text-[#5c6e63] max-md:border-[#d9efdf] max-md:bg-[#effaf1] ${
                     editable
                         ? 'border-[#dfeae2] bg-[#fbfdfb] focus:border-[#2c9350] focus:ring-4 focus:ring-[#e6f7eb]'
                         : 'border-[#e5eee7] bg-[#f8fcf8]'

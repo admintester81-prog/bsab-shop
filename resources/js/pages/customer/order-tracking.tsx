@@ -1,7 +1,8 @@
 import { api, getApiErrorMessage, prepareSanctum } from '@/lib/api';
 import { Head, Link } from '@inertiajs/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import QRCode from 'qrcode';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 import {
     ArrowLeft,
     ArrowRight,
@@ -10,17 +11,17 @@ import {
     CalendarDays,
     Check,
     Clipboard,
-    Copy,
-    Download,
     FileText,
     Leaf,
     MapPin,
     Package,
-    QrCode,
     Star,
     Truck,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
+type MapPoint = { latitude: number; longitude: number; label: string };
+type GeocodingResult = { lat: string; lon: string; display_name: string };
 
 type OrderItem = {
     id: number;
@@ -39,6 +40,15 @@ type OrderItem = {
         size?: string | null;
     };
     variant?: { name?: string } | null;
+    shop?: {
+        id: number;
+        name: string;
+        tracking_location?: {
+            latitude?: number | string | null;
+            longitude?: number | string | null;
+            label?: string;
+        } | null;
+    } | null;
 };
 
 function OrderItemProductCard({ item }: { item: OrderItem }) {
@@ -141,6 +151,16 @@ type CustomerOrder = {
     status?: string;
     created_at: string;
     total?: string | number;
+    shipping_address?: {
+        line1?: string;
+        house_number?: string;
+        barangay?: string;
+        city?: string;
+        province?: string;
+        postal_code?: string;
+        latitude?: number | null;
+        longitude?: number | null;
+    };
     items?: OrderItem[];
     delivery_tracking?: {
         status: string;
@@ -349,104 +369,6 @@ function Timeline({ order }: { order: CustomerOrder }) {
     );
 }
 
-function OrderTrackingQrCard({ order }: { order: CustomerOrder }) {
-    const [trackingUrl, setTrackingUrl] = useState('');
-    const [qrImage, setQrImage] = useState('');
-    const [qrError, setQrError] = useState('');
-    const [qrLoading, setQrLoading] = useState(true);
-    const [copyMessage, setCopyMessage] = useState('');
-
-    useEffect(() => {
-        let cancelled = false;
-        setQrLoading(true);
-        setQrError('');
-        setQrImage('');
-
-        try {
-            const url = new URL('/customer/order-tracking', window.location.origin);
-            url.searchParams.set('order_id', String(order.id));
-            setTrackingUrl(url.toString());
-            QRCode.toDataURL(url.toString(), {
-                errorCorrectionLevel: 'H',
-                margin: 2,
-                width: 320,
-                color: { dark: '#145b52', light: '#ffffff' },
-            }).then(
-                (image) => {
-                    if (cancelled) return;
-                    setQrImage(image);
-                    setQrLoading(false);
-                },
-                (error: unknown) => {
-                    if (cancelled) return;
-                    setQrError(getApiErrorMessage(error, 'The tracking QR code could not be generated.'));
-                    setQrLoading(false);
-                },
-            );
-        } catch (error) {
-            if (!cancelled) {
-                setQrError(getApiErrorMessage(error, 'The tracking QR code could not be generated.'));
-                setQrLoading(false);
-            }
-        }
-
-        return () => {
-            cancelled = true;
-        };
-    }, [order.id]);
-
-    async function copyTrackingUrl() {
-        try {
-            await navigator.clipboard.writeText(trackingUrl);
-            setCopyMessage('Tracking link copied.');
-        } catch {
-            setCopyMessage('Could not copy the tracking link. Copy it from your browser address bar.');
-        }
-    }
-
-    return (
-        <section className="tracking-panel tracking-qr-panel">
-            <div className="tracking-panel-heading">
-                <span className="tracking-icon-bubble"><QrCode size={21} /></span>
-                <div>
-                    <h2>Order Tracking QR Code</h2>
-                    <p>Scan to open this order’s tracking page.</p>
-                </div>
-            </div>
-            <div className="tracking-qr-content">
-                <div className="tracking-qr-image" aria-live="polite">
-                    {qrLoading ? (
-                        <span className="tracking-muted">Generating QR code…</span>
-                    ) : qrError ? (
-                        <span className="tracking-error">{qrError}</span>
-                    ) : (
-                        <img src={qrImage} alt="QR code linking to this order's authenticated tracking page" />
-                    )}
-                </div>
-                <div className="tracking-qr-actions">
-                    <p className="tracking-reference">{order.order_number}</p>
-                    <p className="tracking-muted">The tracking page requires customer sign-in.</p>
-                    <div className="tracking-action-row">
-                        {qrImage && (
-                            <a
-                                href={qrImage}
-                                download={`order-${order.order_number}-tracking-qr.png`}
-                                className="tracking-outline-button"
-                            >
-                                <Download size={15} /> Download QR Code
-                            </a>
-                        )}
-                        <button type="button" onClick={copyTrackingUrl} disabled={!trackingUrl} className="tracking-outline-button">
-                            <Copy size={15} /> Copy Tracking Link
-                        </button>
-                    </div>
-                    {copyMessage && <p className="tracking-feedback" role="status">{copyMessage}</p>}
-                </div>
-            </div>
-        </section>
-    );
-}
-
 function OrderSummary({ order }: { order: CustomerOrder }) {
     const status = trackingStatus(order);
     const normalized = normalizedStatus(status);
@@ -501,6 +423,142 @@ function TrackingReferenceCard({ order }: { order: CustomerOrder }) {
                 <span>No courier tracking number is available yet. Updates depend on the seller and delivery partner.</span>
             </p>
             {copyMessage && <p className="tracking-feedback" role="status">{copyMessage}</p>}
+        </section>
+    );
+}
+
+function DeliveryRouteMap({ order }: { order: CustomerOrder }) {
+    const status = trackingStatus(order);
+    const mapContainerRef = useRef<HTMLDivElement | null>(null);
+    const [routeMessage, setRouteMessage] = useState('Locating the seller and delivery address…');
+    const [routeSummary, setRouteSummary] = useState('');
+    const address = order.shipping_address;
+    const seller = order.items?.find((item) => item.shop)?.shop;
+    const sellerLocation = seller?.tracking_location;
+
+    useEffect(() => {
+        if (!mapContainerRef.current) return;
+
+        let cancelled = false;
+        let map: L.Map | null = null;
+        setRouteMessage('Locating the seller and delivery address…');
+        setRouteSummary('');
+
+        const asPoint = (latitude?: number | string | null, longitude?: number | string | null, label = ''): MapPoint | null => {
+            const parsedLatitude = Number(latitude);
+            const parsedLongitude = Number(longitude);
+            return latitude != null && longitude != null &&
+                Number.isFinite(parsedLatitude) && Number.isFinite(parsedLongitude) &&
+                parsedLatitude >= -90 && parsedLatitude <= 90 &&
+                parsedLongitude >= -180 && parsedLongitude <= 180
+                    ? { latitude: parsedLatitude, longitude: parsedLongitude, label }
+                    : null;
+        };
+
+        const geocode = async (query: string, label: string): Promise<MapPoint | null> => {
+            if (!query.trim()) return null;
+            const results = (await api.get<GeocodingResult[]>('/customer/location/search', { params: { query } })).data;
+            const result = results[0];
+            if (!result) return null;
+            const latitude = Number(result.lat);
+            const longitude = Number(result.lon);
+            return Number.isFinite(latitude) && Number.isFinite(longitude)
+                ? { latitude, longitude, label: result.display_name || label }
+                : null;
+        };
+
+        async function renderMap() {
+            try {
+                const sellerLabel = sellerLocation?.label || seller?.name || 'Seller';
+                const destinationLabel = [
+                    address?.house_number,
+                    address?.line1,
+                    address?.barangay,
+                    address?.city,
+                    address?.province,
+                    address?.postal_code,
+                ].filter(Boolean).join(', ');
+                const [sellerPoint, destinationPoint] = await Promise.all([
+                    asPoint(sellerLocation?.latitude, sellerLocation?.longitude, sellerLabel)
+                        ? Promise.resolve(asPoint(sellerLocation?.latitude, sellerLocation?.longitude, sellerLabel))
+                        : geocode(`${sellerLabel}, Hinoba-an, Negros Occidental, Philippines`, sellerLabel),
+                    asPoint(address?.latitude, address?.longitude, destinationLabel)
+                        ? Promise.resolve(asPoint(address?.latitude, address?.longitude, destinationLabel))
+                        : geocode(destinationLabel, destinationLabel),
+                ]);
+                if (cancelled) return;
+                if (!sellerPoint || !destinationPoint) {
+                    setRouteMessage('A precise seller or delivery address location is not available for this order.');
+                    return;
+                }
+
+                map = L.map(mapContainerRef.current!, { scrollWheelZoom: false, zoomControl: true });
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                    maxZoom: 19,
+                }).addTo(map);
+
+                const sellerLatLng: L.LatLngExpression = [sellerPoint.latitude, sellerPoint.longitude];
+                const destinationLatLng: L.LatLngExpression = [destinationPoint.latitude, destinationPoint.longitude];
+                L.circleMarker(sellerLatLng, {
+                    radius: 8,
+                    color: '#ffffff',
+                    weight: 3,
+                    fillColor: '#168b43',
+                    fillOpacity: 1,
+                }).addTo(map).bindTooltip(seller?.name || 'Seller');
+                L.circleMarker(destinationLatLng, {
+                    radius: 8,
+                    color: '#ffffff',
+                    weight: 3,
+                    fillColor: '#dc5b46',
+                    fillOpacity: 1,
+                }).addTo(map).bindTooltip('Delivery address');
+
+                const routeUrl = `https://router.project-osrm.org/route/v1/driving/${sellerPoint.longitude},${sellerPoint.latitude};${destinationPoint.longitude},${destinationPoint.latitude}?overview=full&geometries=geojson&steps=false`;
+                try {
+                    const response = await fetch(routeUrl);
+                    if (!response.ok) throw new Error('Directions service is unavailable.');
+                    const directions = await response.json() as {
+                        code?: string;
+                        routes?: { distance: number; duration: number; geometry: { coordinates: [number, number][] } }[];
+                    };
+                    const route = directions.code === 'Ok' ? directions.routes?.[0] : undefined;
+                    if (!route) throw new Error('No driving route was found.');
+                    if (cancelled) return;
+                    const routeCoordinates = route.geometry.coordinates.map(([longitude, latitude]) => [latitude, longitude] as L.LatLngTuple);
+                    L.polyline(routeCoordinates, { color: '#168b43', weight: 5, opacity: 0.9 }).addTo(map);
+                    setRouteSummary(`${(route.distance / 1000).toFixed(1)} km · about ${Math.max(1, Math.round(route.duration / 60))} min`);
+                    map.fitBounds(L.latLngBounds(routeCoordinates), { padding: [36, 36], maxZoom: 15 });
+                    setRouteMessage('Road route between the seller and delivery address');
+                } catch {
+                    map.fitBounds(L.latLngBounds([sellerLatLng, destinationLatLng]), { padding: [36, 36], maxZoom: 15 });
+                    setRouteMessage('Real seller and delivery locations shown; road directions are currently unavailable.');
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    setRouteMessage(getApiErrorMessage(error, 'Could not load real map locations. Please try again later.'));
+                }
+            }
+        }
+
+        void renderMap();
+        return () => {
+            cancelled = true;
+            map?.remove();
+        };
+    }, [address, seller?.name, sellerLocation]);
+
+    return (
+        <section className="tracking-route-panel" aria-label="Delivery route overview">
+            <div className="tracking-route-map">
+                <div ref={mapContainerRef} className="tracking-real-map" aria-label="OpenStreetMap showing the seller location, delivery address, and driving route" />
+                <div className="tracking-route-status">
+                    <span className="tracking-route-status-icon"><Truck size={15} /></span>
+                    <span><strong>{statusLabel(status)}</strong><small>{routeSummary || 'Delivery route'}</small></span>
+                </div>
+            </div>
+            <p className="tracking-route-note">{routeMessage}. Live rider location is not available.</p>
         </section>
     );
 }
@@ -584,6 +642,23 @@ export default function CustomerOrderTracking() {
                     .tracking-layout{display:grid;grid-template-columns:minmax(0,1.9fr) minmax(300px,.9fr);align-items:start;gap:18px}
                     .tracking-main,.tracking-sidebar{display:grid;min-width:0;gap:16px}
                     .tracking-panel{min-width:0;border:1px solid #dcefe5;border-radius:20px;background:#fff;padding:20px;box-shadow:0 8px 25px #20785b0d}
+                    .tracking-route-panel{width:100%;max-width:440px;margin:0 auto 2px;overflow:hidden;border:1px solid #dcefe5;border-radius:19px;background:#fff;box-shadow:0 8px 25px #20785b0d}
+                    .tracking-route-map{position:relative;min-height:230px;aspect-ratio:1/1;overflow:hidden;background:#f3f8f5}
+                    .tracking-real-map{position:absolute;inset:0;z-index:0}
+                    .tracking-route-status{position:absolute;z-index:500;top:12px;left:12px;display:flex;align-items:center;gap:8px;border:1px solid #e3eee7;border-radius:14px;background:#ffffffed;padding:7px 10px;color:#167846;box-shadow:0 3px 12px #164c2b14}
+                    .tracking-route-status-icon{display:grid;width:27px;height:27px;place-items:center;border-radius:50%;background:#e2f5e8}
+                    .tracking-route-status strong,.tracking-route-status small{display:block}
+                    .tracking-route-status strong{font-size:10px;font-weight:850}
+                    .tracking-route-status small{margin-top:2px;color:#72938b;font-size:9px}
+                    .tracking-route-marker{position:absolute;display:flex;align-items:center;gap:5px}
+                    .tracking-route-marker>span{display:grid;width:28px;height:28px;place-items:center;border:2px solid #fff;border-radius:50%;background:#168b43;color:white;box-shadow:0 3px 9px #145b5233}
+                    .tracking-route-marker strong{border-radius:8px;background:#ffffffed;padding:4px 6px;color:#173b2a;font-size:8px;box-shadow:0 2px 8px #164c2b14}
+                    .tracking-route-seller{top:61%;left:17%}
+                    .tracking-route-destination{top:31%;right:7%;flex-direction:column;gap:1px}
+                    .tracking-route-destination>span{width:31px;height:31px;border-radius:50% 50% 50% 2px;transform:rotate(-45deg)}
+                    .tracking-route-destination>span svg{transform:rotate(45deg)}
+                    .tracking-route-locate{position:absolute;right:11px;bottom:11px;display:grid;width:30px;height:30px;place-items:center;border:1px solid #e0ebe5;border-radius:50%;background:#ffffffed;color:#168b43}
+                    .tracking-route-note{margin:0;padding:8px 12px;color:#78988f;font-size:9px;line-height:1.4}
                     .tracking-panel-heading{display:flex;align-items:center;gap:12px;margin-bottom:16px}
                     .tracking-panel-heading h2{margin:0;color:#145b52;font-size:16px;font-weight:800}
                     .tracking-panel-heading p{margin:3px 0 0;color:#78988f;font-size:12px}
@@ -637,12 +712,7 @@ export default function CustomerOrderTracking() {
                     .tracking-muted{color:#78988f;font-size:11px;line-height:1.5}
                     .tracking-error{color:#a94435;font-size:11px;line-height:1.5}
                     .tracking-feedback{margin:7px 0 0;color:#138a55;font-size:11px;font-weight:700}
-                    .tracking-qr-content{display:grid;grid-template-columns:126px minmax(0,1fr);align-items:center;gap:14px}
-                    .tracking-qr-image{display:flex;min-height:126px;align-items:center;justify-content:center;border:1px solid #c6ebd4;border-radius:13px;background:#fff;padding:8px;text-align:center}
-                    .tracking-qr-image img{display:block;width:100%;max-width:120px;height:auto;image-rendering:pixelated}
                     .tracking-reference{margin:0 0 5px;color:#145b52;font-size:14px;font-weight:850;overflow-wrap:anywhere}
-                    .tracking-qr-actions{min-width:0}
-                    .tracking-action-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
                     .tracking-estimate-value{margin:2px 0 0;color:#145b52;font-size:17px;font-weight:850}
                     .tracking-tracking-number{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
                     .tracking-heading-compact{margin:0}
@@ -683,7 +753,7 @@ export default function CustomerOrderTracking() {
                     @media(max-width:820px){
                         .tracking-layout{grid-template-columns:minmax(0,1fr)}
                         .tracking-sidebar{grid-template-columns:repeat(2,minmax(0,1fr))}
-                        .tracking-qr-panel,.tracking-status-message,.tracking-summary-panel{grid-column:1/-1}
+                        .tracking-status-message,.tracking-summary-panel{grid-column:1/-1}
                     }
                     @media(max-width:640px){
                         .tracking-page{padding:18px 14px 30px}
@@ -694,6 +764,8 @@ export default function CustomerOrderTracking() {
                         .tracking-main,.tracking-sidebar{gap:13px}
                         .tracking-sidebar{grid-template-columns:minmax(0,1fr)}
                         .tracking-panel{border-radius:18px;padding:15px}
+                        .tracking-route-panel{max-width:360px;border-radius:17px}
+                        .tracking-route-map{min-height:220px}
                         .tracking-order-head{align-items:flex-start;flex-direction:column;gap:12px}
                         .tracking-order-number{font-size:19px}
                         .tracking-timeline-list{flex-direction:column}
@@ -708,15 +780,6 @@ export default function CustomerOrderTracking() {
                         .tracking-product-image{width:64px;height:64px}
                         .tracking-product-content{grid-template-columns:minmax(0,1fr);gap:10px}
                         .tracking-rating{padding-top:9px}
-                        .tracking-qr-content{grid-template-columns:108px minmax(0,1fr);gap:12px}
-                        .tracking-qr-image{min-height:108px}
-                        .tracking-action-row{flex-direction:column;align-items:stretch}
-                        .tracking-action-row .tracking-outline-button{width:100%}
-                    }
-                    @media(max-width:390px){
-                        .tracking-qr-content{grid-template-columns:1fr}
-                        .tracking-qr-image{min-height:150px}
-                        .tracking-qr-image img{max-width:142px}
                     }
                 `}</style>
                 <div className="tracking-container">
@@ -757,6 +820,7 @@ export default function CustomerOrderTracking() {
                         <>
                             <div className="tracking-layout">
                                 <div className="tracking-main">
+                                    <DeliveryRouteMap order={order} />
                                     <section className="tracking-panel">
                                         <div className="tracking-panel-heading">
                                             <span className="tracking-icon-bubble"><Truck size={21} /></span>
@@ -803,7 +867,6 @@ export default function CustomerOrderTracking() {
                                 </div>
 
                                 <aside className="tracking-sidebar">
-                                    <div className="tracking-qr-panel"><OrderTrackingQrCard order={order} /></div>
                                     <section className="tracking-panel">
                                         <div className="tracking-panel-heading">
                                             <span className="tracking-icon-bubble"><CalendarDays size={20} /></span>

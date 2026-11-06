@@ -44,6 +44,8 @@ class CheckoutController extends Controller
             'shipping_address.city' => 'required|string|max:255',
             'shipping_address.province' => 'required|string|max:255',
             'shipping_address.postal_code' => 'nullable|string|max:20',
+            'shipping_address.latitude' => 'nullable|numeric|between:-90,90',
+            'shipping_address.longitude' => 'nullable|numeric|between:-180,180',
             'payment_method' => 'required|string|in:cash_on_delivery,gcash',
             'delivery_option' => 'required|string|in:local_delivery,seller_delivery,pickup',
             'selected_item_ids' => 'nullable|array|min:1',

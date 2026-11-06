@@ -1,23 +1,50 @@
 import { Head, useForm, usePage } from '@inertiajs/react';
-import { Camera, Check, CheckCircle2, CloudUpload, ImagePlus, KeyRound, LockKeyhole, Mail, Phone, Save, UserRound } from 'lucide-react';
+import { Camera, Check, CheckCircle2, CloudUpload, ImagePlus, KeyRound, LockKeyhole, Mail, MapPin, Phone, Save, UserRound } from 'lucide-react';
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 
 import InputError from '@/components/input-error';
+import MapPickerModal from '@/components/map-picker-modal';
 import { PortalLayout } from '@/components/portal-layout';
 import { optimizeImage } from '@/lib/image-upload';
 import { type SharedData } from '@/types';
 
-type SellerProfileData = SharedData & { avatarUrl?: string | null };
+type SellerProfileData = SharedData & {
+    address?: {
+        full_name: string;
+        phone: string;
+        line1: string;
+        barangay?: string | null;
+        city: string;
+        province: string;
+        postal_code: string;
+        latitude?: number | null;
+        longitude?: number | null;
+    } | null;
+    avatarUrl?: string | null;
+};
 
 export default function SellerProfile() {
-    const { auth, avatarUrl } = usePage<SellerProfileData>().props;
+    const { auth, avatarUrl, address } = usePage<SellerProfileData>().props;
     const [avatarPreview, setAvatarPreview] = useState<string | null>(avatarUrl ?? null);
+    const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
+    const [isEditingAddress, setIsEditingAddress] = useState(!address?.line1);
     const profileForm = useForm({
         _method: 'patch',
         name: auth.user.name ?? '',
         email: auth.user.email ?? '',
         phone: (auth.user.phone as string | undefined) ?? '',
         avatar: null as File | null,
+    });
+    const addressForm = useForm({
+        full_name: address?.full_name ?? auth.user.name ?? '',
+        phone: address?.phone ?? (auth.user.phone as string | undefined) ?? '',
+        line1: address?.line1 ?? '',
+        barangay: address?.barangay ?? '',
+        city: address?.city ?? '',
+        province: address?.province ?? '',
+        postal_code: address?.postal_code ?? '',
+        latitude: address?.latitude ?? null as number | null,
+        longitude: address?.longitude ?? null as number | null,
     });
     const passwordForm = useForm({ password: '', password_confirmation: '' });
     const password = passwordForm.data.password;
@@ -38,6 +65,31 @@ export default function SellerProfile() {
     function submitProfile(event: FormEvent) {
         event.preventDefault();
         profileForm.post(route('profile.update'), { forceFormData: true, preserveScroll: true });
+    }
+
+    function submitAddress(event: FormEvent) {
+        event.preventDefault();
+        addressForm.transform((data) => ({
+            _method: 'patch' as const,
+            name: profileForm.data.name,
+            email: profileForm.data.email,
+            phone: profileForm.data.phone,
+            address: data,
+        }));
+        addressForm.post(route('profile.update'), {
+            preserveScroll: true,
+            onSuccess: () => setIsEditingAddress(false),
+            onError: (errors) => {
+                for (const field of ['full_name', 'phone', 'line1', 'barangay', 'city', 'province', 'postal_code', 'latitude', 'longitude'] as const) {
+                    const message = errors[`address.${field}`];
+                    if (message) addressForm.setError(field, message);
+                }
+                for (const field of ['name', 'email', 'phone'] as const) {
+                    const message = errors[field];
+                    if (message) profileForm.setError(field, message);
+                }
+            },
+        });
     }
 
     function submitPassword(event: FormEvent) {
@@ -290,8 +342,118 @@ export default function SellerProfile() {
                             </div>
                         </form>
                     </div>
+                    <form
+                        onSubmit={submitAddress}
+                        className="min-w-0 rounded-xl border border-[#e4ebe6] bg-white p-4 shadow-[0_3px_14px_rgba(31,70,48,0.045)] sm:p-5"
+                    >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#e8f5ec] text-[#28734c]">
+                                    <MapPin size={18} />
+                                </span>
+                                <div>
+                                    <h2 className="text-sm font-bold text-[#25372c]">Seller Address</h2>
+                                    <p className="mt-0.5 text-[10px] text-[#7c8a81]">Add or update your address and pin the location on a map.</p>
+                                </div>
+                            </div>
+                            {!isEditingAddress && (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditingAddress(true)}
+                                    className="rounded-lg border border-[#dce5df] px-3 py-1.5 text-[11px] font-semibold text-[#267647] transition hover:bg-[#f2faf4]"
+                                >
+                                    Edit address
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#dceee2] bg-[#f7fcf8] p-3">
+                            <div className="flex min-w-0 items-start gap-2">
+                                <MapPin size={15} className="mt-0.5 shrink-0 text-[#28734c]" />
+                                <p className="m-0 min-w-0 text-xs text-[#37483d]">
+                                    {addressForm.data.line1
+                                        ? [addressForm.data.line1, addressForm.data.barangay, addressForm.data.city, addressForm.data.province]
+                                              .filter(Boolean)
+                                              .join(', ')
+                                        : 'No address saved yet.'}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsMapPickerOpen(true)}
+                                className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-[#b9d9c3] bg-white px-3 text-[11px] font-semibold text-[#267647] transition hover:bg-[#f2faf4]"
+                            >
+                                <MapPin size={13} /> Pick on map
+                            </button>
+                        </div>
+
+                        <div className="mt-4 grid gap-3.5 sm:grid-cols-2">
+                            {([
+                                ['full_name', 'Recipient name'],
+                                ['phone', 'Address phone'],
+                                ['line1', 'Street address'],
+                                ['barangay', 'Barangay / sitio'],
+                                ['city', 'City / municipality'],
+                                ['province', 'Province'],
+                                ['postal_code', 'Postal code'],
+                            ] as const).map(([field, label]) => (
+                                <label key={field} className="block text-[11px] font-semibold text-[#37483d]">
+                                    {label} <span className="text-[#db4b4b]">*</span>
+                                    <input
+                                        required
+                                        value={addressForm.data[field]}
+                                        disabled={!isEditingAddress}
+                                        onChange={(event) => {
+                                            addressForm.setData(field, event.target.value);
+                                            if (field === 'line1') {
+                                                addressForm.setData('latitude', null);
+                                                addressForm.setData('longitude', null);
+                                            }
+                                        }}
+                                        className="mt-1.5 h-10 w-full rounded-lg border border-[#dce5df] bg-white px-3 text-xs font-normal text-[#344238] outline-none transition placeholder:text-[#9aa69e] focus:border-[#279054] focus:ring-2 focus:ring-[#e5f3e9] disabled:bg-[#f6f9f7] disabled:text-[#718076]"
+                                    />
+                                    <InputError message={addressForm.errors[field]} className="mt-1" />
+                                </label>
+                            ))}
+                        </div>
+                        <InputError message={addressForm.errors.latitude || addressForm.errors.longitude} className="mt-2" />
+                        {isEditingAddress && (
+                            <div className="mt-4">
+                                <button
+                                    type="submit"
+                                    disabled={addressForm.processing}
+                                    className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#188747] px-4 text-xs font-semibold text-white transition hover:bg-[#126d39] disabled:opacity-50"
+                                >
+                                    <Save size={14} /> {addressForm.processing ? 'Saving address...' : 'Save address'}
+                                </button>
+                                {addressForm.recentlySuccessful && (
+                                    <p role="status" className="mt-2 text-center text-xs font-medium text-[#288b50]">
+                                        Address saved.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                    </form>
                 </div>
             </PortalLayout>
+            <MapPickerModal
+                isOpen={isMapPickerOpen}
+                onClose={() => setIsMapPickerOpen(false)}
+                initialAddress={addressForm.data}
+                onSelectLocation={(location) => {
+                    addressForm.setData((current) => ({
+                        ...current,
+                        line1: location.line1,
+                        barangay: location.barangay,
+                        city: location.city,
+                        province: location.province,
+                        postal_code: location.postal_code,
+                        latitude: location.lat,
+                        longitude: location.lng,
+                    }));
+                    setIsEditingAddress(true);
+                }}
+            />
         </>
     );
 }

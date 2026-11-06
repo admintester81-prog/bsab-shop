@@ -1,6 +1,8 @@
 import { type SharedData } from '@/types';
 import { Head, Link, router, usePage } from '@inertiajs/react';
+import { api } from '@/lib/api';
 import CustomerBottomNav from '@/components/customer-bottom-nav';
+import { ProductSearchAutocomplete } from '@/components/product-search-experience';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import {
     ArrowRight,
@@ -136,9 +138,9 @@ export default function Welcome({
     const [activeCategory, setActiveCategory] = useState('all');
     const [search, setSearch] = useState(query);
     const [liked, setLiked] = useState<number[]>(() => products.filter((product) => product.is_favorited).map((product) => product.id));
-    const [accountOpen, setAccountOpen] = useState(false);
     const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
     const [filterOpen, setFilterOpen] = useState(false);
+    const [searchFocused, setSearchFocused] = useState(false);
     const [sortBy, setSortBy] = useState<'default' | 'price-asc' | 'price-desc' | 'rating'>('default');
     const [inStockOnly, setInStockOnly] = useState(false);
     const searchableText = (product: Product) =>
@@ -213,7 +215,29 @@ export default function Welcome({
 
     function submitSearch(event: React.FormEvent) {
         event.preventDefault();
+        const query = search.trim();
+        if (query.length >= 2) {
+            if (auth.user) {
+                void api.post('/customer/search-history', { query }).catch((error: unknown) => {
+                    console.error('Could not save product search history.', error);
+                });
+            } else {
+                try {
+                    const previous = JSON.parse(window.localStorage.getItem('bsabshop-search-history') || '[]');
+                    const history = Array.isArray(previous) ? previous.filter((item): item is string => typeof item === 'string') : [];
+                    window.localStorage.setItem('bsabshop-search-history', JSON.stringify([query, ...history.filter((item) => item.toLowerCase() !== query.toLowerCase())].slice(0, 8)));
+                } catch (error) {
+                    console.error('Could not save local product search history.', error);
+                }
+            }
+        }
         openProducts();
+    }
+
+    function selectSearchSuggestion(term: string) {
+        setSearch(term);
+        setSearchFocused(false);
+        router.get(route('customer.products'), { q: term }, { preserveState: false, viewTransition: true });
     }
 
     return (
@@ -258,6 +282,7 @@ export default function Welcome({
                                         { label: 'Favorites', href: route('customer.favorites'), icon: Heart },
                                         { label: 'Cart', href: route('customer.cart'), icon: ShoppingCart },
                                         { label: 'Vouchers', href: route('customer.vouchers'), icon: TicketPercent },
+                                        { label: 'Settings', href: route('customer.settings'), icon: Settings },
                                     ].map(({ label, href, icon: Icon }) => (
                                         <Link
                                             key={label}
@@ -345,7 +370,12 @@ export default function Welcome({
                         </nav>
                         <form
                             onSubmit={submitSearch}
-                            className="order-2 flex w-full items-center gap-2 rounded-full border border-[#dfeae2] bg-[#fbfdfb] px-3.5 py-2.5 focus-within:border-[#2c9350] focus-within:ring-4 focus-within:ring-[#e6f7eb] min-[430px]:max-[640px]:order-2 min-[430px]:max-[640px]:px-2.5 min-[430px]:max-[640px]:py-2 sm:order-1 sm:w-auto sm:max-w-130 sm:flex-1 lg:order-2 lg:mx-0 lg:my-0 lg:max-w-155"
+                            onBlur={(event) => {
+                                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                                    window.setTimeout(() => setSearchFocused(false), 120);
+                                }
+                            }}
+                            className="relative order-2 flex w-full items-center gap-2 rounded-full border border-[#dfeae2] bg-[#fbfdfb] px-3.5 py-2.5 focus-within:border-[#2c9350] focus-within:ring-4 focus-within:ring-[#e6f7eb] min-[430px]:max-[640px]:order-2 min-[430px]:max-[640px]:px-2.5 min-[430px]:max-[640px]:py-2 sm:order-1 sm:w-auto sm:max-w-130 sm:flex-1 lg:order-2 lg:mx-0 lg:my-0 lg:max-w-155"
                         >
                             <button type="submit" aria-label="Search products" className="shrink-0 text-[#647568] transition hover:text-[#1f7a42] min-[430px]:max-[640px]:hidden">
                                 <Search size={16} />
@@ -353,7 +383,7 @@ export default function Welcome({
                             <input
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
-                                onClick={openProducts}
+                                onFocus={() => setSearchFocused(true)}
                                 placeholder="Search for products, brands and more..."
                                 aria-label="Search products"
                                 className="w-full cursor-pointer bg-transparent text-sm outline-none placeholder:text-[#5c6e63] min-[430px]:max-[640px]:text-xs"
@@ -363,6 +393,12 @@ export default function Welcome({
                                     <X size={15} />
                                 </button>
                             )}
+                            <ProductSearchAutocomplete
+                                query={search}
+                                open={searchFocused}
+                                authenticated={Boolean(auth.user)}
+                                onSelect={selectSearchSuggestion}
+                            />
                             {/* Universal filter icon - mobile size only */}
                             <button
                                 type="button"
@@ -392,12 +428,10 @@ export default function Welcome({
                             </Link>
 
                             {auth.user ? (
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setAccountOpen(!accountOpen)}
+                                <Link
+                                        href={route('customer.profile')}
                                         className="flex h-10 w-10 items-center justify-center rounded-full bg-transparent text-[#1b4332] transition hover:bg-[#f5fcf7] min-[430px]:max-[640px]:h-9 min-[430px]:max-[640px]:w-9"
-                                        aria-label="Open account menu"
-                                        aria-expanded={accountOpen}
+                                        aria-label="Open profile"
                                     >
                                         <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-[#52b788] text-[10px] font-bold text-[#1b4332] min-[430px]:max-[640px]:h-7 min-[430px]:max-[640px]:w-7">
                                             {avatarUrl(auth.user.avatar) ? (
@@ -410,54 +444,7 @@ export default function Welcome({
                                                 auth.user.name.slice(0, 2).toUpperCase()
                                             )}
                                         </span>
-                                    </button>
-                                    {accountOpen && (
-                                        <div className="absolute top-12 right-0 z-20 w-44 rounded-xl border border-[#def0e2] bg-white p-1.5 shadow-[0_8px_25px_rgba(22,59,36,0.1)]">
-                                            <Link
-                                                href={route('customer.profile')}
-                                                className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
-                                            >
-                                                <UserRound size={16} /> Profile
-                                            </Link>
-                                            <hr className="my-1 border-[#def0e2]" />
-                                            <Link
-                                                href={route('customer.orders')}
-                                                className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
-                                            >
-                                                <Package size={16} /> My orders
-                                            </Link>
-                                            <hr className="my-1 border-[#def0e2]" />
-                                            <Link
-                                                href={route('customer.vouchers')}
-                                                className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
-                                                aria-label={`Voucher${newVoucherCount > 0 ? `, ${newVoucherCount} new` : ''}`}
-                                            >
-                                                <TicketPercent size={16} /> Voucher
-                                                {newVoucherCount > 0 && (
-                                                    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-[#52b788] px-1.5 text-[10px] font-bold text-white">
-                                                        {newVoucherCount > 99 ? '99+' : newVoucherCount}
-                                                    </span>
-                                                )}
-                                            </Link>
-                                            <hr className="my-1 border-[#def0e2]" />
-                                            <Link
-                                                href={route('customer.settings')}
-                                                className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
-                                            >
-                                                <Settings size={16} /> Settings
-                                            </Link>
-                                            <hr className="my-1 border-[#def0e2]" />
-                                            <Link
-                                                href={route('logout')}
-                                                method="post"
-                                                as="button"
-                                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-[#d96c5a] hover:bg-[#fdf0ed]"
-                                            >
-                                                <LogOut size={16} /> Log out
-                                            </Link>
-                                        </div>
-                                    )}
-                                </div>
+                                </Link>
                             ) : (
                                 <Link
                                     href={route('login')}
@@ -482,11 +469,10 @@ export default function Welcome({
                                             </span>
                                         )}
                                     </Link>
-                                    <div className="relative">
-                                        <button
-                                            onClick={() => setAccountOpen(!accountOpen)}
+                                    <Link
+                                            href={route('customer.profile')}
                                             className="flex items-center gap-2 rounded-full bg-transparent px-2.5 py-1.5 text-[#1b4332] transition hover:bg-[#f5fcf7]"
-                                            aria-label="Open account menu"
+                                            aria-label="Open profile"
                                         >
                                             <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-[#52b788] text-[10px] font-bold text-[#1b4332]">
                                                 {avatarUrl(auth.user.avatar) ? (
@@ -499,54 +485,7 @@ export default function Welcome({
                                                     auth.user.name.slice(0, 2).toUpperCase()
                                                 )}
                                             </span>
-                                        </button>
-                                        {accountOpen && (
-                                            <div className="absolute top-12 right-0 z-20 w-44 rounded-xl border border-[#def0e2] bg-white p-1.5 shadow-[0_8px_25px_rgba(22,59,36,0.1)]">
-                                                <Link
-                                                    href={route('customer.profile')}
-                                                    className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
-                                                >
-                                                    <UserRound size={16} /> Profile
-                                                </Link>
-                                                <hr className="my-1 border-[#def0e2]" />
-                                                <Link
-                                                    href={route('customer.orders')}
-                                                    className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
-                                                >
-                                                    <Package size={16} /> My orders
-                                                </Link>
-                                                <hr className="my-1 border-[#def0e2]" />
-                                                <Link
-                                                    href={route('customer.vouchers')}
-                                                    className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
-                                                    aria-label={`Voucher${newVoucherCount > 0 ? `, ${newVoucherCount} new` : ''}`}
-                                                >
-                                                    <TicketPercent size={16} /> Voucher
-                                                    {newVoucherCount > 0 && (
-                                                        <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-[#52b788] px-1.5 text-[10px] font-bold text-white">
-                                                            {newVoucherCount > 99 ? '99+' : newVoucherCount}
-                                                        </span>
-                                                    )}
-                                                </Link>
-                                                <hr className="my-1 border-[#def0e2]" />
-                                                <Link
-                                                    href={route('customer.settings')}
-                                                    className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm hover:bg-[#f5fcf7]"
-                                                >
-                                                    <Settings size={16} /> Settings
-                                                </Link>
-                                                <hr className="my-1 border-[#def0e2]" />
-                                                <Link
-                                                    href={route('logout')}
-                                                    method="post"
-                                                    as="button"
-                                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-[#d96c5a] hover:bg-[#fdf0ed]"
-                                                >
-                                                    <LogOut size={16} /> Log out
-                                                </Link>
-                                            </div>
-                                        )}
-                                    </div>
+                                    </Link>
                                 </>
                             ) : (
                                 <Link
@@ -561,7 +500,7 @@ export default function Welcome({
                 </header>
                 <main className="mx-auto flex max-w-310 flex-col px-5 pb-24 sm:px-8 md:pb-12">
                     <nav
-                        className="order-2 mx-[-1.25rem] mt-0 flex scrollbar-none gap-3 overflow-x-auto rounded-none border-0 bg-white px-4 py-3 shadow-[0_4px_16px_rgba(38,104,63,0.04)] [&::-webkit-scrollbar]:hidden sm:mx-[-2rem] lg:mx-0 lg:mt-3 lg:rounded-2xl lg:border lg:border-[#e3eee6]"
+                        className="order-2 -mx-5 mt-0 flex scrollbar-none gap-3 overflow-x-auto rounded-none border-0 bg-white px-4 py-3 shadow-[0_4px_16px_rgba(38,104,63,0.04)] [&::-webkit-scrollbar]:hidden sm:-mx-8 lg:mx-0 lg:mt-3 lg:rounded-2xl lg:border lg:border-[#e3eee6]"
                         aria-label="Product categories"
                     >
                         <button
@@ -604,7 +543,7 @@ export default function Welcome({
                             );
                         })}
                     </nav>
-                    <section className="relative order-1 mx-[-1.25rem] mt-0 min-h-60 overflow-hidden rounded-none border border-[#e1ebdf] bg-[#eef6e8] px-4 py-6 shadow-[0_8px_25px_rgba(22,59,36,0.06)] sm:mx-[-2rem] sm:px-8 sm:py-8 md:px-11 md:py-9 lg:mx-0 lg:mt-3 lg:rounded-2xl">
+                    <section className="relative order-1 -mx-5 mt-0 min-h-60 overflow-hidden rounded-none border border-[#e1ebdf] bg-[#eef6e8] px-4 py-6 shadow-[0_8px_25px_rgba(22,59,36,0.06)] sm:-mx-8 sm:px-8 sm:py-8 md:px-11 md:py-9 lg:mx-0 lg:mt-3 lg:rounded-2xl">
                         {heroMediaType === 'video' && heroMediaPath && (
                             <video src={heroMediaPath} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover" />
                         )}
@@ -639,7 +578,7 @@ export default function Welcome({
                     </section>
                     <section
                         id="products"
-                        className="order-3 mx-[-1.25rem] mt-0 rounded-none border-0 bg-white p-4 sm:mx-[-2rem] sm:p-5 lg:mx-0 lg:mt-5 lg:rounded-2xl lg:border lg:border-[#e3eee6]"
+                        className="order-3 -mx-5 mt-0 rounded-none border-0 bg-white p-4 sm:-mx-8 sm:p-5 lg:mx-0 lg:mt-5 lg:rounded-2xl lg:border lg:border-[#e3eee6]"
                     >
                         <div className="mb-4 flex items-end justify-between gap-4">
                             <div>
@@ -842,7 +781,7 @@ export default function Welcome({
                             </div>
                         </section>
                     )}
-                    <footer className="order-10 mx-[-1.25rem] mt-0 border-t border-[#e0ebe2] bg-white px-5 py-7 text-xs text-[#61786b] sm:mx-[-2rem] sm:px-7 lg:mx-0 lg:mt-8">
+                    <footer className="order-10 -mx-5 mt-0 border-t border-[#e0ebe2] bg-white px-5 py-7 text-xs text-[#61786b] sm:-mx-8 sm:px-7 lg:mx-0 lg:mt-8">
                         <div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_1fr_1fr_1.2fr]">
                             <div>
                                 <div className="flex items-center gap-2 text-base font-bold text-[#145c3d]">
@@ -962,7 +901,7 @@ export default function Welcome({
                                             <button
                                                 key={opt.id}
                                                 type="button"
-                                                onClick={() => setSortBy(opt.id as any)}
+                                                onClick={() => setSortBy(opt.id as typeof sortBy)}
                                                 className={`flex items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${
                                                     sortBy === opt.id
                                                         ? 'border-[#1f7a42] bg-[#f0faf3] text-[#1f7a42]'
