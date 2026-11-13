@@ -1,27 +1,36 @@
 import { PortalLayout } from '@/components/portal-layout';
 import { Head, Link, router, useForm } from '@inertiajs/react';
+import { api, prepareSanctum } from '@/lib/api';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 import {
     AlertCircle,
     ArrowRight,
     BadgeCheck,
     Bike,
+    CalendarDays,
     Camera,
     Check,
     CheckCircle2,
     Clock3,
+    LocateFixed,
     MapPin,
     Package,
     Search,
     ShieldCheck,
+    Store,
     Truck,
     UserRound,
+    X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 type Role = 'admin' | 'seller' | 'rider' | 'customer';
 type DeliveryStatus = 'ready' | 'in_transit' | 'arrived' | 'delivered' | 'completed' | 'failed';
-type DeliveryItem = { name: string; shop?: string | null; quantity: number; total: number | string; image: string | null };
+type SellerLocation = { latitude?: number | string | null; longitude?: number | string | null; label: string };
+type DeliveryItem = { name: string; shop?: string | null; seller_location?: SellerLocation | null; quantity: number; unit_price: number | string; total: number | string; image: string | null };
 type DeliveryEvent = { id: number; status: string; note?: string | null; actor?: string | null; at?: string | null; proof_url?: string | null };
+type LocationPoint = { latitude: number; longitude: number; updated_at?: string | null };
 type Delivery = {
     id: number;
     status: DeliveryStatus;
@@ -33,12 +42,16 @@ type Delivery = {
     confirmed_at?: string | null;
     failed_at?: string | null;
     proof_url?: string | null;
+    rider_location?: LocationPoint | null;
     rider?: { id: number; name: string; phone?: string | null } | null;
     order: {
         id: number;
         number: string;
+        created_at?: string | null;
         total?: number | string | null;
         address?: string | null;
+        latitude?: number | string | null;
+        longitude?: number | string | null;
         instructions?: string | null;
         eta?: string | null;
         customer?: { name: string; phone?: string | null } | null;
@@ -100,7 +113,7 @@ function when(value?: string | null) {
 function tone(status: string) {
     if (status === 'completed' || status === 'delivered') return 'bg-[#e6f5eb] text-[#1c7a42]';
     if (status === 'in_transit') return 'bg-[#e8f2fb] text-[#347baa]';
-    if (status === 'arrived') return 'bg-[#f0edff] text-[#6757a1]';
+    if (status === 'arrived') return 'bg-[#e6f5eb] text-[#1c7a42]';
     if (status === 'failed') return 'bg-[#fff0ed] text-[#b6483e]';
     return 'bg-[#fff5df] text-[#94650d]';
 }
@@ -111,7 +124,8 @@ function imageUrl(path?: string | null) {
 }
 
 function Badge({ status }: { status: string }) {
-    return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone(status)}`}>{statusNames[status as DeliveryStatus] ?? status}</span>;
+    const isArrived = status === 'arrived' || status === 'completed';
+    return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone(status)}`}>{isArrived && <CheckCircle2 size={13} />}{statusNames[status as DeliveryStatus] ?? status}</span>;
 }
 
 function Stat({ label, value, note, Icon }: { label: string; value: number; note: string; Icon: typeof Truck }) {
@@ -127,7 +141,306 @@ function Stat({ label, value, note, Icon }: { label: string; value: number; note
     );
 }
 
-function DetailPanel({ role, delivery }: { role: Role; delivery: Delivery }) {
+function validPoint(latitude?: number | string | null, longitude?: number | string | null): L.LatLngTuple | null {
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    return latitude != null && longitude != null && Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+        ? [lat, lng]
+        : null;
+}
+
+function mapTooltip(text: string): HTMLSpanElement {
+    const label = document.createElement('span');
+    label.textContent = text;
+    return label;
+}
+
+function LiveDeliveryMap({ role, delivery }: { role: Role; delivery: Delivery }) {
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const mapRef = useRef<L.Map | null>(null);
+    const customerMarkerRef = useRef<L.Marker | null>(null);
+    const riderMarkerRef = useRef<L.Marker | null>(null);
+    const sellerMarkersRef = useRef<L.Marker[]>([]);
+    const routeRef = useRef<L.Polyline | null>(null);
+    const hasFittedRouteRef = useRef(false);
+    const uploadAtRef = useRef(0);
+    const [destination, setDestination] = useState<L.LatLngTuple | null>(
+        validPoint(delivery.order.latitude, delivery.order.longitude),
+    );
+    const sellerLocations = useMemo(() => {
+        const seen = new Set<string>();
+        return delivery.order.items.flatMap((item) => {
+            const location = item.seller_location;
+            if (!location) return [];
+            const key = `${location.latitude ?? ''}:${location.longitude ?? ''}:${location.label}`;
+            if (seen.has(key)) return [];
+            seen.add(key);
+            return [location];
+        });
+    }, [delivery.order.items]);
+    const [sellerPoints, setSellerPoints] = useState<Array<{ point: L.LatLngTuple; label: string }>>(() =>
+        sellerLocations.flatMap((location) => {
+            const point = validPoint(location.latitude, location.longitude);
+            return point ? [{ point, label: location.label }] : [];
+        }),
+    );
+    const [riderLocation, setRiderLocation] = useState<LocationPoint | null>(delivery.rider_location ?? null);
+    const [mapMessage, setMapMessage] = useState('Loading delivery map…');
+    const [locationError, setLocationError] = useState('');
+    const [mapReady, setMapReady] = useState(false);
+
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const map = L.map(containerRef.current, { scrollWheelZoom: false }).setView([9.59, 122.47], 14);
+        mapRef.current = map;
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+            maxZoom: 19,
+        }).addTo(map);
+        setMapReady(true);
+
+        let cancelled = false;
+        const geocode = async (query: string): Promise<L.LatLngTuple | null> => {
+            const { data } = await api.get<Array<{ lat: string; lon: string }>>('/customer/location/search', {
+                params: { query },
+            });
+            return validPoint(data[0]?.lat, data[0]?.lon);
+        };
+        async function resolveDestination() {
+            if (!validPoint(delivery.order.latitude, delivery.order.longitude) && delivery.order.address) {
+                try {
+                    const point = await geocode(delivery.order.address);
+                    if (cancelled) return;
+                    if (point) {
+                        setDestination(point);
+                    } else {
+                        setMapMessage('A precise delivery destination could not be found.');
+                    }
+                } catch {
+                    if (!cancelled) setMapMessage('Map location lookup failed. Check the delivery address and try again.');
+                }
+            }
+            const locationsWithoutCoordinates = sellerLocations.filter(
+                (location) => !validPoint(location.latitude, location.longitude),
+            );
+            const resolvedSellerPoints = await Promise.all(locationsWithoutCoordinates.map(async (location) => {
+                try {
+                    const point = await geocode(location.label);
+                    return point ? { point, label: location.label } : null;
+                } catch {
+                    return null;
+                }
+            }));
+            if (cancelled) return;
+            setSellerPoints([
+                ...sellerLocations.flatMap((location) => {
+                    const point = validPoint(location.latitude, location.longitude);
+                    return point ? [{ point, label: location.label }] : [];
+                }),
+                ...resolvedSellerPoints.filter((entry): entry is { point: L.LatLngTuple; label: string } => entry !== null),
+            ]);
+        }
+        void resolveDestination();
+
+        return () => {
+            cancelled = true;
+            map.remove();
+            mapRef.current = null;
+            customerMarkerRef.current = null;
+            riderMarkerRef.current = null;
+            sellerMarkersRef.current = [];
+            routeRef.current = null;
+            hasFittedRouteRef.current = false;
+        };
+    }, [delivery.id, delivery.order.address, delivery.order.latitude, delivery.order.longitude, sellerLocations]);
+
+    useEffect(() => {
+        if (!mapReady || !mapRef.current) return;
+        const map = mapRef.current;
+        if (destination) {
+            customerMarkerRef.current?.remove();
+            customerMarkerRef.current = L.marker(destination, {
+                icon: L.divIcon({
+                    className: '',
+                    html: '<span style="display:grid;place-items:center;width:34px;height:34px;border:3px solid white;border-radius:50%;background:#df3737;color:white;font-size:19px;box-shadow:0 2px 8px #0004">⌂</span>',
+                    iconSize: [34, 34],
+                    iconAnchor: [17, 17],
+                }),
+            }).addTo(map).bindTooltip(mapTooltip(`Customer · ${delivery.order.address || 'Delivery destination'}`), {
+                permanent: true,
+                direction: 'top',
+                offset: [0, -10],
+                maxWidth: 220,
+            });
+        }
+
+        sellerMarkersRef.current.forEach((marker) => marker.remove());
+        sellerMarkersRef.current = sellerPoints.map(({ point, label }) => L.marker(point, {
+            icon: L.divIcon({
+                className: '',
+                html: '<span style="display:grid;place-items:center;width:36px;height:36px;border:3px solid white;border-radius:50%;background:#218a47;color:white;font-size:15px;font-weight:700;box-shadow:0 2px 8px #0004">S</span>',
+                iconSize: [36, 36],
+                iconAnchor: [18, 18],
+            }),
+        }).addTo(map).bindTooltip(mapTooltip(`Seller · ${label}`), {
+            permanent: true,
+            direction: 'top',
+            offset: [0, -10],
+            maxWidth: 220,
+        }));
+
+        const riderPoint = validPoint(riderLocation?.latitude, riderLocation?.longitude);
+        if (riderPoint) {
+            if (!riderMarkerRef.current) {
+                riderMarkerRef.current = L.marker(riderPoint, {
+                    icon: L.divIcon({
+                        className: '',
+                        html: '<span style="display:grid;place-items:center;width:38px;height:38px;border:3px solid white;border-radius:50%;background:#1688e8;color:white;font-size:18px;box-shadow:0 2px 8px #0004">🏍</span>',
+                        iconSize: [38, 38],
+                        iconAnchor: [19, 19],
+                    }),
+                }).addTo(map);
+            } else {
+                riderMarkerRef.current.setLatLng(riderPoint);
+            }
+            riderMarkerRef.current.bindTooltip(mapTooltip(`${delivery.rider?.name ?? 'Logistics'} · ${delivery.status === 'in_transit' ? 'In Transit' : statusNames[delivery.status]}`), {
+                permanent: true,
+                direction: 'right',
+                offset: [8, 0],
+            });
+        }
+
+        if (!destination || !riderPoint) {
+            setMapMessage(
+                !destination
+                    ? sellerPoints.length ? 'Seller location shown; finding the delivery destination…' : 'Finding the delivery destination…'
+                    : delivery.status === 'in_transit'
+                      ? 'Waiting for the rider’s GPS location…'
+                      : 'No live rider GPS update is available.',
+            );
+            const visiblePoints = [...(destination ? [destination] : []), ...sellerPoints.map(({ point }) => point)];
+            if (visiblePoints.length === 1) map.setView(visiblePoints[0], 15);
+            else if (visiblePoints.length > 1) map.fitBounds(L.latLngBounds(visiblePoints), { padding: [40, 40], maxZoom: 15 });
+            return;
+        }
+
+        const abortController = new AbortController();
+        const [riderLat, riderLng] = riderPoint;
+        const [customerLat, customerLng] = destination;
+        const routeUrl = `https://router.project-osrm.org/route/v1/driving/${riderLng},${riderLat};${customerLng},${customerLat}?overview=full&geometries=geojson&steps=false`;
+        void fetch(routeUrl, { signal: abortController.signal })
+            .then((response) => {
+                if (!response.ok) throw new Error('Directions are temporarily unavailable.');
+                return response.json() as Promise<{ code?: string; routes?: { geometry: { coordinates: [number, number][] }; distance: number; duration: number }[] }>;
+            })
+            .then((result) => {
+                const route = result.code === 'Ok' ? result.routes?.[0] : undefined;
+                if (!route) throw new Error('No road route was found.');
+                routeRef.current?.remove();
+                routeRef.current = L.polyline(
+                    route.geometry.coordinates.map(([lng, lat]) => [lat, lng] as L.LatLngTuple),
+                    { color: '#1688e8', weight: 5, opacity: 0.9 },
+                ).addTo(map);
+                setMapMessage(`${(route.distance / 1000).toFixed(1)} km · about ${Math.max(1, Math.round(route.duration / 60))} min`);
+                if (!hasFittedRouteRef.current) {
+                    const bounds = routeRef.current.getBounds();
+                    sellerPoints.forEach(({ point }) => bounds.extend(point));
+                    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+                    hasFittedRouteRef.current = true;
+                }
+            })
+            .catch((error: unknown) => {
+                if (abortController.signal.aborted) return;
+                setMapMessage(error instanceof Error ? error.message : 'Road directions are temporarily unavailable.');
+            });
+        return () => abortController.abort();
+    }, [delivery.order.address, delivery.rider?.name, delivery.status, destination, mapReady, riderLocation, sellerPoints]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const pollLocation = async () => {
+            try {
+                const { data } = await api.get<LocationPoint | null>(`/deliveries/${delivery.id}/location`);
+                if (!cancelled && data?.latitude != null && data.longitude != null) {
+                    setRiderLocation(data);
+                    setLocationError('');
+                }
+            } catch {
+                if (!cancelled) setLocationError('Live location could not be refreshed.');
+            }
+        };
+        void pollLocation();
+        const interval = window.setInterval(pollLocation, 10000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(interval);
+        };
+    }, [delivery.id]);
+
+    useEffect(() => {
+        if (role !== 'rider' || delivery.status !== 'in_transit' || !navigator.geolocation) return;
+        let cancelled = false;
+        const watchId = navigator.geolocation.watchPosition(
+            async ({ coords }) => {
+                const point = { latitude: coords.latitude, longitude: coords.longitude };
+                setRiderLocation(point);
+                setLocationError('');
+                if (Date.now() - uploadAtRef.current < 10000) return;
+                uploadAtRef.current = Date.now();
+                try {
+                    await prepareSanctum();
+                    await api.post(`/deliveries/${delivery.id}/location`, point);
+                } catch {
+                    if (!cancelled) setLocationError('Your GPS position could not be shared. Check your connection and permissions.');
+                }
+            },
+            () => setLocationError('Allow location access to share your live position with the customer.'),
+            { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+        );
+        return () => {
+            cancelled = true;
+            navigator.geolocation.clearWatch(watchId);
+        };
+    }, [delivery.id, delivery.status, role]);
+
+    function locateMe() {
+        if (!navigator.geolocation) {
+            setLocationError('This device does not support location access.');
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            ({ coords }) => mapRef.current?.setView([coords.latitude, coords.longitude], 16),
+            () => setLocationError('Allow location access to center the map on your current position.'),
+            { enableHighAccuracy: true, timeout: 12000 },
+        );
+    }
+
+    return (
+        <section className="overflow-hidden rounded-xl border border-[#dcebe0] bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-[#f0fbf2] px-4 py-3">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-[#203e2c]"><MapPin size={17} className="text-[#208c49]" /> Live Delivery Map</h3>
+                <span className="text-[11px] font-medium text-[#718176]">{mapMessage}</span>
+            </div>
+            <div className="relative">
+                <div ref={containerRef} className="h-[280px] w-full sm:h-[360px]" aria-label="Map showing rider and delivery destination" />
+                <button type="button" onClick={locateMe} aria-label="Center map on current location" title="My location" className="absolute top-3 right-3 z-[500] flex h-10 w-10 items-center justify-center rounded-lg border border-[#d8e3da] bg-white text-[#315d3d] shadow-md hover:bg-[#f1f8f2]">
+                    <LocateFixed size={18} />
+                </button>
+                <div className="absolute bottom-3 left-3 z-[500] flex gap-3 rounded-lg border border-[#dfe8e1] bg-white/95 px-3 py-2 text-[10px] font-semibold text-[#47584d] shadow-sm">
+                    <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-[#1688e8]" /> Rider</span>
+                    <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-[#218a47]" /><Store size={11} /> Seller</span>
+                    <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-[#df3737]" /> Customer</span>
+                </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#edf2ee] px-4 py-2.5 text-[10px] text-[#839187]">
+                <span>{riderLocation?.updated_at ? `Last rider update ${when(riderLocation.updated_at)}` : role === 'rider' && delivery.status === 'in_transit' ? 'Sharing GPS updates while this page is open' : 'Waiting for the rider’s first GPS update'}</span>
+                {locationError && <span role="status" className="text-[#a3453b]">{locationError}</span>}
+            </div>
+        </section>
+    );
+}
+
+function DetailPanel({ role, delivery, onClose }: { role: Role; delivery: Delivery; onClose: () => void }) {
     const proofForm = useForm<{ proof: File | null }>({ proof: null });
     const [preview, setPreview] = useState<string | null>(null);
     const [failureReason, setFailureReason] = useState('');
@@ -168,30 +481,56 @@ function DetailPanel({ role, delivery }: { role: Role; delivery: Delivery }) {
     const isRider = role === 'rider';
     const isCustomer = role === 'customer';
 
+    const totalItems = delivery.order.items.reduce((total, item) => total + Number(item.quantity), 0);
+    const leadItem = delivery.order.items[0];
+    const timeline = [
+        ['ready', 'Rider assigned', delivery.assigned_at],
+        ['in_transit', 'In transit', delivery.started_at],
+        ['arrived', 'Arrived at destination', delivery.arrived_at],
+        ['delivered', 'Photo submitted', delivery.submitted_at],
+        ['completed', 'Receipt confirmed', delivery.confirmed_at],
+    ] as const;
+
     return (
-        <section className="mt-4 rounded-2xl border border-[#dcebe0] bg-white p-4 shadow-[0_8px_26px_rgba(31,70,48,0.055)] sm:p-6">
-            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#edf2ee] pb-4">
-                <div className="min-w-0">
-                    <p className="text-[10px] font-bold tracking-[0.15em] text-[#8b9c90] uppercase">Order {delivery.order.number}</p>
-                    <h2 className="mt-1 text-lg font-bold text-[#193e2a] sm:text-xl">Delivery details</h2>
+        <section className="mt-4 space-y-4 rounded-2xl border border-[#dcebe0] bg-[#fbfdfb] p-3 shadow-[0_8px_26px_rgba(31,70,48,0.055)] sm:p-5">
+            <div className="rounded-xl border border-[#e1ebe3] bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-start gap-3">
+                    <div className="flex h-[76px] w-[76px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#edf7ef]">
+                        {imageUrl(leadItem?.image) ? <img src={imageUrl(leadItem?.image)!} alt={leadItem?.name ?? 'Order product'} className="h-full w-full object-cover" /> : <Package size={25} className="text-[#7b9b84]" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div><h2 className="text-base font-bold text-[#193e2a]">{leadItem?.name ?? 'Order details'}</h2><p className="mt-0.5 text-xs text-[#738278]">Order {delivery.order.number}</p></div>
+                            <Badge status={delivery.status} />
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            <div className="flex items-start gap-2 text-xs text-[#52675a]"><UserRound size={15} className="mt-0.5 shrink-0" /><span><span className="block text-[10px] text-[#8b9c90]">Customer</span>{delivery.order.customer?.name ?? 'Customer'}</span></div>
+                            <div className="flex items-start gap-2 text-xs text-[#52675a]"><Bike size={15} className="mt-0.5 shrink-0" /><span><span className="block text-[10px] text-[#8b9c90]">Assigned rider</span>{delivery.rider?.name ?? 'Not assigned'}</span></div>
+                            <div className="flex items-start gap-2 text-xs text-[#52675a]"><Package size={15} className="mt-0.5 shrink-0" /><span><span className="block text-[10px] text-[#8b9c90]">Total items</span>{totalItems}</span></div>
+                            <div className="flex items-start gap-2 text-xs font-bold text-[#198342]"><span><span className="block text-[10px] font-medium text-[#8b9c90]">Order total</span>{money(delivery.order.total)}</span></div>
+                        </div>
+                        <p className="mt-3 flex items-center gap-1.5 text-[10px] text-[#87958b]"><CalendarDays size={13} /> {when(delivery.order.created_at)}</p>
+                    </div>
+                    <button type="button" onClick={onClose} className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-lg border border-[#dce7de] bg-white px-2.5 text-xs font-semibold text-[#54705e] hover:bg-[#f5faf6]"><X size={14} /> Close details</button>
                 </div>
-                <Badge status={delivery.status} />
             </div>
 
             {delivery.status === 'completed' && isCustomer && (
-                <div className="my-4 flex items-start gap-3 rounded-xl border border-[#cfead7] bg-[#f0faf3] p-4 text-[#216c3d]">
+                <div className="flex items-start gap-3 rounded-xl border border-[#cfead7] bg-[#f0faf3] p-4 text-[#216c3d]">
                     <CheckCircle2 className="mt-0.5 shrink-0" size={22} />
                     <div><h3 className="font-bold">Order completed</h3><p className="mt-1 text-sm">Thanks for confirming receipt. Your order is now complete.</p></div>
                 </div>
             )}
             {delivery.status === 'failed' && (
-                <div className="my-4 flex items-start gap-3 rounded-xl border border-[#f4d5d0] bg-[#fff7f5] p-4 text-[#a3453b]">
+                <div className="flex items-start gap-3 rounded-xl border border-[#f4d5d0] bg-[#fff7f5] p-4 text-[#a3453b]">
                     <AlertCircle className="mt-0.5 shrink-0" size={20} />
                     <div><h3 className="font-semibold">Delivery needs attention</h3><p className="mt-1 text-sm">{delivery.failure_reason || 'The delivery was not completed.'}</p></div>
                 </div>
             )}
 
-            <div className="mt-4 grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+            <LiveDeliveryMap role={role} delivery={delivery} />
+
+            <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
                 <div className="min-w-0 space-y-4">
                     <div className="grid gap-3 sm:grid-cols-2">
                         <div className="rounded-xl bg-[#f7faf7] p-3.5">
@@ -223,7 +562,7 @@ function DetailPanel({ role, delivery }: { role: Role; delivery: Delivery }) {
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <p className="truncate text-sm font-semibold text-[#294333]">{item.name}</p>
-                                        <p className="mt-0.5 text-xs text-[#829087]">{item.shop ? `${item.shop} · ` : ''}Qty {item.quantity}</p>
+                                        <p className="mt-0.5 text-xs text-[#829087]">{item.shop ? `${item.shop} · ` : ''}Qty {item.quantity} · {money(item.unit_price)} each</p>
                                     </div>
                                     <span className="shrink-0 text-xs font-semibold text-[#52685a]">{money(item.total)}</span>
                                 </div>
@@ -261,13 +600,7 @@ function DetailPanel({ role, delivery }: { role: Role; delivery: Delivery }) {
                                 {delivery.order.eta && <p className="mt-3 border-t border-[#d8ebdc] pt-2.5 text-xs text-[#53715b]"><span className="font-semibold">Estimated delivery:</span> {delivery.order.eta}</p>}
                             </div>
                             <ol className="space-y-0">
-                                {[
-                                    ['ready', 'Rider assigned', delivery.assigned_at],
-                                    ['in_transit', 'In transit', delivery.started_at],
-                                    ['arrived', 'Arrived at destination', delivery.arrived_at],
-                                    ['delivered', 'Photo submitted', delivery.submitted_at],
-                                    ['completed', 'Receipt confirmed', delivery.confirmed_at],
-                                ].map(([key, label, date], index) => {
+                                {timeline.map(([key, label, date], index) => {
                                     const event = delivery.events.find((entry) => entry.status === key);
                                     const isComplete = Boolean(date);
                                     return (
@@ -284,25 +617,26 @@ function DetailPanel({ role, delivery }: { role: Role; delivery: Delivery }) {
                                     );
                                 })}
                             </ol>
-                            {delivery.events.length > 0 && (
-                                <div className="mt-4 border-t border-[#edf2ee] pt-3">
-                                    <h4 className="mb-2 text-[10px] font-bold tracking-wide text-[#788a7d] uppercase">Activity history</h4>
-                                    <ul className="space-y-2.5">
-                                        {delivery.events.slice(0, 6).map((event) => (
-                                            <li key={event.id} className="flex min-w-0 items-start gap-2.5">
-                                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#66a77a]" />
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="text-[11px] font-semibold text-[#405b47]">{event.note || statusNames[event.status as DeliveryStatus] || event.status}</p>
-                                                    <p className="mt-0.5 text-[10px] text-[#94a098]">{when(event.at)}{event.actor ? ` · ${event.actor}` : ''}</p>
-                                                </div>
-                                                {event.proof_url && <a href={event.proof_url} target="_blank" rel="noreferrer" className="shrink-0 text-[10px] font-semibold text-[#287b46] underline">View photo</a>}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
                         </div>
                     </div>
+
+                    <section className="overflow-hidden rounded-xl border border-[#dcebe0] bg-white">
+                        <div className="flex items-center gap-2 bg-[#f0fbf2] px-4 py-3"><Clock3 size={16} className="text-[#208c49]" /><h3 className="text-sm font-bold text-[#294333]">Activity history</h3></div>
+                        {delivery.events.length ? (
+                            <ul className="space-y-3 p-4">
+                                {delivery.events.map((event) => (
+                                    <li key={event.id} className="flex min-w-0 items-start gap-2.5">
+                                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#218a47]" />
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-xs font-semibold text-[#405b47]">{event.note || statusNames[event.status as DeliveryStatus] || event.status}</p>
+                                            <p className="mt-0.5 text-[10px] text-[#94a098]">{when(event.at)}{event.actor ? ` · ${event.actor}` : ''}</p>
+                                        </div>
+                                        {event.proof_url && <a href={event.proof_url} target="_blank" rel="noreferrer" className="shrink-0 text-[10px] font-semibold text-[#287b46] underline">View photo</a>}
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : <p className="p-4 text-xs text-[#839187]">Delivery activity will appear here as progress is updated.</p>}
+                    </section>
 
                     {isRider && delivery.status === 'ready' && (
                         <button type="button" disabled={working} onClick={() => post(`/delivery-list/${delivery.id}/start`)} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#168447] px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#116d3a] disabled:opacity-60">
@@ -595,7 +929,7 @@ export default function DeliveryList({ role, shopName, deliveries, readyOrders, 
                             {filteredDeliveries.length ? (
                                 <>
                                     <DeliveryTable deliveries={filteredDeliveries} selectedId={selectedId} role={role} onSelect={(id) => setSelectedId((current) => current === id ? null : id)} />
-                                    {selected && <DetailPanel key={selected.id} role={role} delivery={selected} />}
+                                    {selected && <DetailPanel key={selected.id} role={role} delivery={selected} onClose={() => setSelectedId(null)} />}
                                 </>
                             ) : (
                                 <div className="rounded-2xl border border-dashed border-[#d9e6dc] bg-white px-5 py-14 text-center">

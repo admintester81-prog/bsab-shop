@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Address;
 use App\Models\Delivery;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -124,6 +125,78 @@ class DeliveryWorkflowTest extends TestCase
                 ->missing('deliveries.0.order.address'));
     }
 
+    public function test_delivery_details_include_saved_seller_location_coordinates(): void
+    {
+        [$admin, $rider, , $order, $seller] = $this->createShippedOrder();
+        Address::create([
+            'user_id' => $seller->id,
+            'label' => 'Shop',
+            'full_name' => $seller->name,
+            'phone' => '09170000000',
+            'line1' => 'Farm Road',
+            'city' => 'Hinoba-an',
+            'province' => 'Negros Occidental',
+            'postal_code' => '6114',
+            'latitude' => 9.5901,
+            'longitude' => 122.4671,
+            'is_default' => true,
+        ]);
+        $this->actingAs($admin)
+            ->post("/delivery-list/orders/{$order->id}/assign", ['rider_id' => $rider->id])
+            ->assertRedirect();
+
+        $this->actingAs($rider)
+            ->get('/delivery-list')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('delivery-list')
+                ->where('deliveries.0.order.items.0.seller_location.latitude', 9.5901)
+                ->where('deliveries.0.order.items.0.seller_location.longitude', 122.4671)
+                ->where('deliveries.0.order.items.0.seller_location.label', 'Fresh Farm, Farm Road, Hinoba-an, Negros Occidental, 6114'));
+    }
+
+    public function test_seller_can_assign_logistics_after_all_active_order_items_are_accepted(): void
+    {
+        [, $rider, , $order, $seller] = $this->createShippedOrder();
+        $order->items()->update(['fulfillment_status' => 'processing']);
+
+        $this->actingAs($seller)
+            ->postJson("/api/seller/orders/{$order->id}/assign-logistics", ['rider_id' => $rider->id])
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Accept all active order items before assigning logistics.');
+
+        $order->items()->update(['fulfillment_status' => 'accepted']);
+
+        $this->actingAs($seller)
+            ->postJson("/api/seller/orders/{$order->id}/assign-logistics", ['rider_id' => $rider->id])
+            ->assertOk()
+            ->assertJsonPath('delivery.status', 'ready')
+            ->assertJsonPath('delivery.rider.id', $rider->id);
+
+        $this->assertDatabaseHas('deliveries', [
+            'order_id' => $order->id,
+            'rider_id' => $rider->id,
+            'status' => 'ready',
+        ]);
+    }
+
+    public function test_seller_cannot_assign_logistics_to_an_order_their_shop_does_not_sell(): void
+    {
+        [, $rider, , $order] = $this->createShippedOrder();
+        $otherSeller = User::factory()->create(['role' => 'seller']);
+        Shop::create([
+            'user_id' => $otherSeller->id,
+            'name' => 'Unrelated Shop',
+            'slug' => 'unrelated-shop',
+        ]);
+
+        $this->actingAs($otherSeller)
+            ->postJson("/api/seller/orders/{$order->id}/assign-logistics", ['rider_id' => $rider->id])
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('deliveries', ['order_id' => $order->id]);
+    }
+
     public function test_customer_order_tracking_includes_safe_delivery_progress(): void
     {
         [$admin, $rider, $customer, $order] = $this->createShippedOrder();
@@ -143,6 +216,35 @@ class DeliveryWorkflowTest extends TestCase
             ->assertJsonPath('data.0.delivery_tracking.status', 'arrived')
             ->assertJsonPath('data.0.delivery_tracking.rider.name', $rider->name)
             ->assertJsonMissingPath('data.0.delivery.proof_path');
+    }
+
+    public function test_assigned_rider_can_share_live_location_with_delivery_participants(): void
+    {
+        [$admin, $rider, $customer, $order] = $this->createShippedOrder();
+        $this->actingAs($admin)
+            ->post("/delivery-list/orders/{$order->id}/assign", ['rider_id' => $rider->id])
+            ->assertRedirect();
+        $delivery = Delivery::query()->where('order_id', $order->id)->firstOrFail();
+        $this->actingAs($rider)->post("/delivery-list/{$delivery->id}/start")->assertRedirect();
+
+        $this->actingAs($rider)
+            ->postJson("/api/deliveries/{$delivery->id}/location", [
+                'latitude' => 9.5901,
+                'longitude' => 122.4671,
+            ])
+            ->assertOk()
+            ->assertJsonPath('latitude', 9.5901)
+            ->assertJsonPath('longitude', 122.4671);
+
+        $this->actingAs($customer)
+            ->getJson("/api/deliveries/{$delivery->id}/location")
+            ->assertOk()
+            ->assertJsonPath('latitude', 9.5901)
+            ->assertJsonPath('longitude', 122.4671);
+
+        $this->actingAs(User::factory()->create(['role' => 'customer']))
+            ->getJson("/api/deliveries/{$delivery->id}/location")
+            ->assertForbidden();
     }
 
     public function test_only_the_assigned_rider_can_start_a_delivery(): void
@@ -236,6 +338,8 @@ class DeliveryWorkflowTest extends TestCase
         $rider = User::factory()->create(['role' => 'rider']);
         $customer = User::factory()->create(['role' => 'customer']);
         $seller = User::factory()->create(['role' => 'seller']);
+        Role::findOrCreate('seller', 'web');
+        $seller->assignRole('seller');
         $shop = Shop::create([
             'user_id' => $seller->id,
             'name' => 'Fresh Farm',

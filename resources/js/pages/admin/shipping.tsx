@@ -54,6 +54,22 @@ const optionLabels: Record<DeliveryOptionKey, { title: string; description: stri
     pickup: { title: 'Pickup', description: 'Customers collect orders from the seller when available.' },
 };
 
+const barangayOptions = [
+    'Alim',
+    'Asia',
+    'Bacuyangan',
+    'Barangay I (Poblacion)',
+    'Barangay II (Poblacion)',
+    'Bulwangan',
+    'Culipapa',
+    'Damutan',
+    'Daug',
+    'Po-ok',
+    'San Rafael',
+    'Sangke',
+    'Talacagay',
+];
+
 const fieldClassName = 'w-full rounded-lg border border-[#dfe8e1] bg-white px-3 py-2.5 text-sm text-[#173b27] outline-none focus:border-[#2c9350]';
 const labelClassName = 'grid gap-1.5 text-xs font-semibold text-[#315947]';
 
@@ -219,12 +235,22 @@ export default function AdminShipping({
                                     </label>
                                     <label className={labelClassName}>
                                         Barangay
-                                        <input
+                                        <select
                                             value={zoneForm.data.barangay}
                                             onChange={(event) => zoneForm.setData('barangay', event.target.value)}
                                             className={fieldClassName}
                                             required
-                                        />
+                                        >
+                                            <option value="">Select a barangay</option>
+                                            {zoneForm.data.barangay && !barangayOptions.includes(zoneForm.data.barangay) && (
+                                                <option value={zoneForm.data.barangay}>{zoneForm.data.barangay} (current)</option>
+                                            )}
+                                            {barangayOptions.map((barangay) => (
+                                                <option key={barangay} value={barangay}>
+                                                    {barangay}
+                                                </option>
+                                            ))}
+                                        </select>
                                         {zoneForm.errors.barangay && <span className="font-normal text-red-600">{zoneForm.errors.barangay}</span>}
                                     </label>
                                     <label className={`${labelClassName} md:col-span-2`}>

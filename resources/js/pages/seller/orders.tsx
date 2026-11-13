@@ -65,6 +65,7 @@ type SellerOrderItem = {
 		created_at?: string;
 		user?: { name?: string; email?: string; phone?: string };
 		payments?: Array<{ status?: string; gateway?: string; amount?: number | string }>;
+		delivery?: { status?: string; rider?: { id: number; name: string } | null } | null;
 	};
 };
 
@@ -147,6 +148,10 @@ export default function SellerOrders() {
 		queryKey: ['seller-orders'],
 		queryFn: async () => (await api.get('/seller/orders')).data,
 	});
+	const { data: logisticsData, isError: logisticsError, isLoading: logisticsLoading } = useQuery({
+		queryKey: ['seller-logistics'],
+		queryFn: async () => (await api.get('/seller/logistics')).data,
+	});
 	const [search, setSearch] = useState('');
 	const [statusFilter, setStatusFilter] = useState('all');
 	const [paymentFilter, setPaymentFilter] = useState('all');
@@ -155,7 +160,9 @@ export default function SellerOrders() {
 	const [dateTo, setDateTo] = useState('');
 	const [selectedItem, setSelectedItem] = useState<SellerOrderItem | null>(null);
 	const [declineItem, setDeclineItem] = useState<SellerOrderItem | null>(null);
+	const [selectedRiders, setSelectedRiders] = useState<Record<number, string>>({});
 	const [actionError, setActionError] = useState('');
+	const riders = (logisticsData ?? []) as Array<{ id: number; name: string }>;
 
 	const updateStatus = useMutation({
 		mutationFn: async ({ id, status }: { id: number; status: OrderStatus }) => {
@@ -169,6 +176,18 @@ export default function SellerOrders() {
 			await queryClient.invalidateQueries({ queryKey: ['seller-orders'] });
 		},
 		onError: () => setActionError('Unable to update this order. Please try again.'),
+	});
+
+	const assignLogistics = useMutation({
+		mutationFn: async ({ orderId, riderId }: { orderId: number; riderId: string }) => {
+			await prepareSanctum();
+			return api.post(`/seller/orders/${orderId}/assign-logistics`, { rider_id: riderId });
+		},
+		onSuccess: async () => {
+			setActionError('');
+			await queryClient.invalidateQueries({ queryKey: ['seller-orders'] });
+		},
+		onError: (error: unknown) => setActionError(getApiErrorMessage(error, 'Unable to assign logistics. Please try again.')),
 	});
 
 	const fetchedOrders = (data?.data ?? []) as SellerOrderItem[];
@@ -416,7 +435,32 @@ export default function SellerOrders() {
 
 							<div className="mt-3 divide-y divide-[#edf1ee]">
 								{isLoading ? <p className="py-10 text-center text-xs text-[#748178]">Loading seller orders…</p> : filteredOrders.length ? filteredOrders.map((item) => (
-									<OrderRow key={item.id} item={item} updatePending={updateStatus.isPending} onAccept={() => { setActionError(''); updateStatus.mutate({ id: item.id, status: 'accepted' }); }} onDecline={() => { setActionError(''); setDeclineItem(item); }} onDetails={() => { setActionError(''); setSelectedItem(item); }} />
+									<OrderRow
+										key={item.id}
+										item={item}
+										updatePending={updateStatus.isPending}
+										riders={riders}
+										logisticsError={logisticsError}
+										logisticsLoading={logisticsLoading}
+										selectedRiderId={item.order?.id ? selectedRiders[item.order.id] ?? '' : ''}
+										assignPending={assignLogistics.isPending}
+										onRiderChange={(riderId) => {
+											if (item.order?.id) setSelectedRiders({ ...selectedRiders, [item.order.id]: riderId });
+										}}
+										onAssignLogistics={() => {
+											if (!item.order?.id) return;
+											const riderId = selectedRiders[item.order.id];
+											if (!riderId) {
+												setActionError('Choose a logistics account before assigning.');
+												return;
+											}
+											setActionError('');
+											assignLogistics.mutate({ orderId: item.order.id, riderId });
+										}}
+										onAccept={() => { setActionError(''); updateStatus.mutate({ id: item.id, status: 'accepted' }); }}
+										onDecline={() => { setActionError(''); setDeclineItem(item); }}
+										onDetails={() => { setActionError(''); setSelectedItem(item); }}
+									/>
 								)) : (
 									<p className="py-10 text-center text-xs text-[#748178]">{isError ? 'Unable to load orders right now.' : 'No orders match these filters.'}</p>
 								)}
@@ -504,9 +548,36 @@ function SummaryCard({ icon: Icon, label, value, tone = 'green', onClick }: { ic
 	);
 }
 
-function OrderRow({ item, updatePending, onAccept, onDecline, onDetails }: { item: SellerOrderItem; updatePending: boolean; onAccept: () => void; onDecline: () => void; onDetails: () => void }) {
+function OrderRow({
+	item,
+	updatePending,
+	riders,
+	logisticsError,
+	logisticsLoading,
+	selectedRiderId,
+	assignPending,
+	onRiderChange,
+	onAssignLogistics,
+	onAccept,
+	onDecline,
+	onDetails,
+}: {
+	item: SellerOrderItem;
+	updatePending: boolean;
+	riders: Array<{ id: number; name: string }>;
+	logisticsError: boolean;
+	logisticsLoading: boolean;
+	selectedRiderId: string;
+	assignPending: boolean;
+	onRiderChange: (riderId: string) => void;
+	onAssignLogistics: () => void;
+	onAccept: () => void;
+	onDecline: () => void;
+	onDetails: () => void;
+}) {
 	const actionable = ['pending', 'processing'].includes(item.fulfillment_status);
 	const paymentStatus = item.order?.payment_status ?? item.order?.payments?.[0]?.status ?? 'Unknown';
+	const delivery = item.order?.delivery;
 	return (
 		<div className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center">
 			<div className="flex min-w-0 flex-1 items-center gap-3">
@@ -519,6 +590,41 @@ function OrderRow({ item, updatePending, onAccept, onDecline, onDetails }: { ite
 					<p className="mt-1 truncate text-[9px] text-[#8a958e]">{item.order?.user?.name ?? 'Customer'} · {dateLabel(item)}</p>
 				</div>
 			</div>
+			{item.fulfillment_status === 'accepted' && item.order?.id && (
+				<div className="flex shrink-0 items-center gap-1.5">
+					{delivery && delivery.status !== 'failed' ? (
+						<span className="text-[10px] font-medium text-[#28784a]">
+							Logistics: {delivery.rider?.name ?? 'Assigned'}
+						</span>
+					) : logisticsError ? (
+						<span className="text-[10px] text-[#a64848]">Unable to load logistics accounts</span>
+					) : logisticsLoading ? (
+						<span className="text-[10px] text-[#829087]">Loading logistics accounts…</span>
+					) : riders.length ? (
+						<>
+							<select
+								aria-label={`Choose logistics for order ${item.order.order_number ?? item.order.id}`}
+								value={selectedRiderId}
+								onChange={(event) => onRiderChange(event.target.value)}
+								className="h-8 max-w-36 rounded-lg border border-[#dfe7e1] bg-white px-2 text-[10px] text-[#526157] outline-none focus:border-[#2a8b52]"
+							>
+								<option value="">Choose logistics</option>
+								{riders.map((rider) => <option key={rider.id} value={rider.id}>{rider.name}</option>)}
+							</select>
+							<button
+								type="button"
+								disabled={!selectedRiderId || assignPending}
+								onClick={onAssignLogistics}
+								className="h-8 rounded-lg border border-[#b8d6c1] bg-[#f0f8f2] px-2.5 text-[10px] font-semibold text-[#267748] hover:bg-[#e6f4e9] disabled:cursor-not-allowed disabled:opacity-50"
+							>
+								{assignPending ? 'Assigning…' : 'Assign logistics'}
+							</button>
+						</>
+					) : (
+						<span className="text-[10px] text-[#829087]">No active logistics accounts</span>
+					)}
+				</div>
+			)}
 			<div className="flex items-center justify-between gap-3 sm:justify-end">
 				<div className="sm:text-right"><p className="text-xs font-bold text-[#2b4033]">{amount(item.total_price)}</p><p className="mt-0.5 text-[9px] text-[#829087]">Payment {paymentStatus}</p></div>
 				<div className="flex shrink-0 items-center gap-1.5">

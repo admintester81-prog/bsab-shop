@@ -6,14 +6,16 @@ use App\Http\Controllers\Api\CheckoutController;
 use App\Http\Controllers\Api\CustomerCartController;
 use App\Http\Controllers\Api\CustomerLocationGeocodingController;
 use App\Http\Controllers\Api\CustomerOrderController;
-use App\Http\Controllers\Api\ProductSearchController;
 use App\Http\Controllers\Api\CustomerProductReviewController;
 use App\Http\Controllers\Api\CustomerVoucherController;
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\ProductSearchController;
 use App\Http\Controllers\Api\SellerProductController;
 use App\Http\Controllers\Api\SupportConversationController;
+use App\Http\Controllers\DeliveryController;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\User;
 use App\Services\VoucherService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -29,10 +31,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('user', fn (Request $request) => $request->user()->load('roles', 'shop', 'addresses'));
     Route::get('support/conversation', [SupportConversationController::class, 'show']);
     Route::post('support/conversation/messages', [SupportConversationController::class, 'store'])->middleware('throttle:5,1');
-    Route::middleware('role:customer|seller')->prefix('customer/location')->group(function () {
+    Route::middleware('role:customer|seller|admin|rider')->prefix('customer/location')->group(function () {
         Route::get('search', [CustomerLocationGeocodingController::class, 'search'])->middleware('throttle:60,1');
         Route::get('reverse', [CustomerLocationGeocodingController::class, 'reverse'])->middleware('throttle:60,1');
     });
+    Route::get('deliveries/{delivery}/location', [DeliveryController::class, 'location']);
+    Route::post('deliveries/{delivery}/location', [DeliveryController::class, 'updateLocation'])->middleware('throttle:30,1');
 
     Route::middleware('role:admin')->prefix('admin')->group(function () {
         Route::get('orders', [AdminOrderController::class, 'index']);
@@ -50,9 +54,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('products', [SellerProductController::class, 'store']);
         Route::patch('products/{product}', [SellerProductController::class, 'update']);
         Route::delete('products/{product}', [SellerProductController::class, 'destroy']);
-        Route::get('orders', fn (Request $request) => $request->user()->shop->orderItems()->with('order.user', 'order.payments', 'product.images')->latest()->paginate(20));
+        Route::get('orders', fn (Request $request) => $request->user()->shop->orderItems()->with('order.user', 'order.payments', 'order.delivery.rider:id,name', 'product.images')->latest()->paginate(20));
+        Route::get('logistics', fn () => User::query()
+            ->where('role', 'rider')
+            ->where(fn ($query) => $query->whereNull('status')->orWhere('status', 'active'))
+            ->orderBy('name')
+            ->get(['id', 'name']));
+        Route::post('orders/{order}/assign-logistics', [DeliveryController::class, 'assignForSeller']);
         Route::patch('orders/items/{item}', function (Request $request, OrderItem $item) {
             $data = $request->validate(['fulfillment_status' => 'required|in:processing,accepted,declined,shipped,cancelled']);
+
             return DB::transaction(function () use ($request, $item, $data) {
                 $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
                 $lockedItem = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();

@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\User;
 use App\Notifications\DeliveryStatusUpdated;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -39,7 +40,12 @@ class DeliveryController extends Controller
                     'order.user:id,name,phone',
                     'order.items' => fn ($query) => $query
                         ->when($role === 'seller', fn ($items) => $items->where('shop_id', $shopId))
-                        ->with(['product:id,name', 'product.images:id,product_id,path,is_primary', 'shop:id,name']),
+                        ->with([
+                            'product:id,name',
+                            'product.images:id,product_id,path,is_primary',
+                            'shop:id,name,user_id',
+                            'shop.user.addresses:id,user_id,line1,barangay,city,province,postal_code,latitude,longitude,is_default',
+                        ]),
                     'events.actor:id,name',
                 ])
                 ->latest('updated_at')
@@ -55,7 +61,7 @@ class DeliveryController extends Controller
                 ->with(['product.images', 'order.user:id,name', 'order.delivery.rider:id,name'])
                 ->latest()
                 ->get()
-                ->map(function (OrderItem $item) use ($shopId) {
+                ->map(function (OrderItem $item) {
                     $delivery = $item->order?->delivery;
                     $image = $item->product?->images->firstWhere('is_primary', true) ?? $item->product?->images->first();
                     $status = match ($delivery?->status) {
@@ -153,28 +159,95 @@ class DeliveryController extends Controller
             $delivery = Delivery::query()->where('order_id', $lockedOrder->id)->lockForUpdate()->first();
             abort_if($delivery && ! in_array($delivery->status, ['ready', 'failed'], true), 422, 'This delivery is already in progress.');
 
-            $delivery ??= new Delivery(['order_id' => $lockedOrder->id]);
-            $delivery->fill([
-                'rider_id' => $rider->id,
-                'status' => 'ready',
-                'assigned_at' => now(),
-                'started_at' => null,
-                'arrived_at' => null,
-                'submitted_at' => null,
-                'confirmed_at' => null,
-                'failed_at' => null,
-                'proof_path' => null,
-                'failure_reason' => null,
-            ]);
-            $delivery->save();
-            $this->event($delivery, $request->user(), 'ready', "Assigned to {$rider->name}.");
-
-            return $delivery->load('order.user', 'order.items.shop.user');
+            return $this->saveRiderAssignment($lockedOrder, $rider, $request->user(), $delivery);
         });
 
         $this->notifyDelivery($delivery, 'ready', $request->user());
 
         return back()->with('success', 'Rider assigned and delivery is ready to start.');
+    }
+
+    public function assignForSeller(Request $request, Order $order): JsonResponse
+    {
+        $this->requireRole($request, 'seller');
+        $data = $request->validate(['rider_id' => ['required', 'integer', 'exists:users,id']]);
+        $sellerShopId = $request->user()->shop?->id;
+        abort_unless($sellerShopId, 403);
+
+        $rider = User::query()
+            ->whereKey($data['rider_id'])
+            ->where('role', 'rider')
+            ->where(fn ($query) => $query->whereNull('status')->orWhere('status', 'active'))
+            ->firstOrFail();
+
+        $delivery = DB::transaction(function () use ($order, $rider, $request, $sellerShopId) {
+            $lockedOrder = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            abort_if(in_array($lockedOrder->status, ['cancelled', 'declined'], true), 422, 'This order cannot be dispatched.');
+            abort_unless(
+                $lockedOrder->items()
+                    ->where('shop_id', $sellerShopId)
+                    ->whereNotIn('fulfillment_status', ['cancelled', 'declined'])
+                    ->exists(),
+                403,
+            );
+
+            $activeItems = $lockedOrder->items()->whereNotIn('fulfillment_status', ['cancelled', 'declined']);
+            abort_unless(
+                $activeItems->exists()
+                    && ! $activeItems->whereNotIn('fulfillment_status', ['accepted', 'shipped'])->exists(),
+                422,
+                'Accept all active order items before assigning logistics.',
+            );
+
+            $delivery = Delivery::query()->where('order_id', $lockedOrder->id)->lockForUpdate()->first();
+            abort_if($delivery && $delivery->status !== 'failed', 422, 'Logistics have already been assigned to this order.');
+
+            return $this->saveRiderAssignment($lockedOrder, $rider, $request->user(), $delivery);
+        });
+
+        $this->notifyDelivery($delivery, 'ready', $request->user());
+
+        return response()->json([
+            'delivery' => [
+                'id' => $delivery->id,
+                'status' => $delivery->status,
+                'rider' => ['id' => $delivery->rider->id, 'name' => $delivery->rider->name],
+            ],
+        ]);
+    }
+
+    public function location(Request $request, Delivery $delivery): JsonResponse
+    {
+        $this->authorizeDeliveryRead($request->user(), $delivery);
+
+        return response()->json([
+            'latitude' => $delivery->rider_latitude,
+            'longitude' => $delivery->rider_longitude,
+            'updated_at' => $delivery->rider_location_updated_at?->toIso8601String(),
+        ]);
+    }
+
+    public function updateLocation(Request $request, Delivery $delivery): JsonResponse
+    {
+        $this->requireAssignedRider($request, $delivery);
+        abort_unless($delivery->status === 'in_transit', 422, 'Rider location can only be updated during an active delivery.');
+
+        $data = $request->validate([
+            'latitude' => ['required', 'numeric', 'between:-90,90'],
+            'longitude' => ['required', 'numeric', 'between:-180,180'],
+        ]);
+
+        $delivery->forceFill([
+            'rider_latitude' => $data['latitude'],
+            'rider_longitude' => $data['longitude'],
+            'rider_location_updated_at' => now(),
+        ])->save();
+
+        return response()->json([
+            'latitude' => $delivery->rider_latitude,
+            'longitude' => $delivery->rider_longitude,
+            'updated_at' => $delivery->rider_location_updated_at?->toIso8601String(),
+        ]);
     }
 
     public function start(Request $request, Delivery $delivery): RedirectResponse
@@ -310,13 +383,21 @@ class DeliveryController extends Controller
             'submitted_at' => $delivery->submitted_at?->toIso8601String(),
             'confirmed_at' => $delivery->confirmed_at?->toIso8601String(),
             'failed_at' => $delivery->failed_at?->toIso8601String(),
+            'rider_location' => $delivery->rider_latitude !== null && $delivery->rider_longitude !== null ? [
+                'latitude' => $delivery->rider_latitude,
+                'longitude' => $delivery->rider_longitude,
+                'updated_at' => $delivery->rider_location_updated_at?->toIso8601String(),
+            ] : null,
             'proof_url' => $delivery->proof_path ? route('delivery-list.proof', $delivery) : null,
             'rider' => $delivery->rider ? ['id' => $delivery->rider->id, 'name' => $delivery->rider->name, 'phone' => $delivery->rider->phone] : null,
             'order' => [
                 'id' => $order->id,
                 'number' => $order->order_number,
+                'created_at' => $order->created_at?->toIso8601String(),
                 'total' => in_array($role, ['admin', 'rider', 'customer'], true) ? $order->total : null,
                 'address' => in_array($role, ['admin', 'rider', 'customer'], true) ? $this->addressText($order->shipping_address) : null,
+                'latitude' => in_array($role, ['admin', 'rider', 'customer'], true) ? ($order->shipping_address['latitude'] ?? null) : null,
+                'longitude' => in_array($role, ['admin', 'rider', 'customer'], true) ? ($order->shipping_address['longitude'] ?? null) : null,
                 'instructions' => in_array($role, ['admin', 'rider', 'customer'], true) ? ($order->shipping_address['delivery_instructions'] ?? null) : null,
                 'eta' => in_array($role, ['admin', 'rider', 'customer'], true) ? ($order->shipping_address['delivery_estimate'] ?? null) : null,
                 'customer' => $order->user ? [
@@ -325,11 +406,26 @@ class DeliveryController extends Controller
                 ] : null,
                 'items' => $items->map(function ($item) {
                     $image = $item->product?->images->firstWhere('is_primary', true) ?? $item->product?->images->first();
+                    $sellerAddress = $item->shop?->user?->addresses->firstWhere('is_default', true)
+                        ?? $item->shop?->user?->addresses->first();
 
                     return [
                         'name' => $item->product?->name ?? 'Product',
                         'shop' => $item->shop?->name,
+                        'seller_location' => $sellerAddress ? [
+                            'latitude' => $sellerAddress->latitude,
+                            'longitude' => $sellerAddress->longitude,
+                            'label' => implode(', ', array_filter([
+                                $item->shop?->name,
+                                $sellerAddress->line1,
+                                $sellerAddress->barangay,
+                                $sellerAddress->city,
+                                $sellerAddress->province,
+                                $sellerAddress->postal_code,
+                            ])),
+                        ] : null,
                         'quantity' => $item->quantity,
+                        'unit_price' => $item->unit_price,
                         'total' => $item->total_price,
                         'image' => $image?->path ? (str_starts_with($image->path, 'http') || str_starts_with($image->path, '/') ? $image->path : '/storage/'.$image->path) : null,
                     ];
@@ -389,6 +485,27 @@ class DeliveryController extends Controller
             'proof_path' => $proofPath,
             'created_at' => now(),
         ]);
+    }
+
+    private function saveRiderAssignment(Order $order, User $rider, User $actor, ?Delivery $delivery): Delivery
+    {
+        $delivery ??= new Delivery(['order_id' => $order->id]);
+        $delivery->fill([
+            'rider_id' => $rider->id,
+            'status' => 'ready',
+            'assigned_at' => now(),
+            'started_at' => null,
+            'arrived_at' => null,
+            'submitted_at' => null,
+            'confirmed_at' => null,
+            'failed_at' => null,
+            'proof_path' => null,
+            'failure_reason' => null,
+        ]);
+        $delivery->save();
+        $this->event($delivery, $actor, 'ready', "Assigned to {$rider->name}.");
+
+        return $delivery->load('order.user', 'order.items.shop.user', 'rider:id,name');
     }
 
     private function notifyDelivery(Delivery $delivery, string $status, User $actor): void

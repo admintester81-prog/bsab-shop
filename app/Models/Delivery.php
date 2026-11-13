@@ -18,6 +18,9 @@ class Delivery extends Model
         'confirmed_at',
         'failed_at',
         'failure_reason',
+        'rider_latitude',
+        'rider_longitude',
+        'rider_location_updated_at',
     ];
 
     protected function casts(): array
@@ -29,6 +32,9 @@ class Delivery extends Model
             'submitted_at' => 'datetime',
             'confirmed_at' => 'datetime',
             'failed_at' => 'datetime',
+            'rider_latitude' => 'float',
+            'rider_longitude' => 'float',
+            'rider_location_updated_at' => 'datetime',
         ];
     }
 
